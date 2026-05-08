@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/chatbot_db
+    username: chatbot_user
+    password: password123
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+server:
+  port: 9999
+
+app:
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      model: phi3
+      system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
