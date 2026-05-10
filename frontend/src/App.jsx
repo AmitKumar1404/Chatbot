@@ -4,9 +4,12 @@ import InputBox from './components/InputBox';
 import { connectWebSocket, sendMessage, sendStopSignal, disconnectWebSocket } from './websocket';
 import './App.css';
 
-let messageIdCounter = 0;
-function nextId() {
-  return ++messageIdCounter;
+// EDIT FEATURE — normalize outbound history for the model (skip in-flight assistant placeholders).
+function buildPriorDtos(messages) {
+  return messages
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+    .filter((m) => !(m.role === 'assistant' && m.streaming))
+    .map((m) => ({ role: m.role, content: m.content ?? '' }));
 }
 
 export default function App() {
@@ -14,92 +17,146 @@ export default function App() {
     {
       id: 1,
       title: 'New Chat',
-      messages: []
-    }
+      messages: [],
+    },
   ]);
 
   const [activeChatId, setActiveChatId] = useState(1);
 
   const [connected, setConnected] = useState(false);
   const [statusText, setStatusText] = useState('Connecting…');
-  const [isTyping, setIsTyping] = useState(false);
+
   const [isStreaming, setIsStreaming] = useState(false);
 
-  // Tracks whether the current assistant message bubble is actively appending chunks.
-  const streamingRef = useRef(false);
   const stopRef = useRef(false);
   const isStreamingRef = useRef(false);
   const activeChatIdRef = useRef(activeChatId);
+  const chatsRef = useRef(chats);
   const streamChatIdRef = useRef(null);
+  const activeClientStreamIdRef = useRef(null);
+  const streamAssistantMessageIdRef = useRef(null);
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  // EDIT FEATURE — avoids stale reads when Save fires while other state updates are in flight.
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
 
   const setStreamingState = useCallback((value) => {
     isStreamingRef.current = value;
     setIsStreaming(value);
   }, []);
 
-  const activeChat = chats.find(c => c.id === activeChatId);
+  const activeChat = chats.find((c) => c.id === activeChatId);
 
+  // UPDATED — clears streaming flags on the targeted assistant bubble (EDIT FEATURE).
   const finalizeStream = useCallback(() => {
-    streamingRef.current = false;
+    const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
+    const assistantId = streamAssistantMessageIdRef.current;
+
+    if (targetChatId != null && assistantId != null) {
+      setChats((prev) =>
+        prev.map((chat) => {
+          if (chat.id !== targetChatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map((m) =>
+              m.id === assistantId && m.role === 'assistant'
+                ? { ...m, streaming: false }
+                : m
+            ),
+          };
+        })
+      );
+    }
+
+    activeClientStreamIdRef.current = null;
+    streamAssistantMessageIdRef.current = null;
     stopRef.current = false;
     streamChatIdRef.current = null;
     setStreamingState(false);
-    setIsTyping(false);
   }, [setStreamingState]);
 
-  const handleChunk = useCallback((chunk) => {
-    if (chunk === '[DONE]') {
-      if (isStreamingRef.current) {
-          finalizeStream();
-      }
-      return;
-  }
-
-    // Ignore stale chunks after local stop click.
+  // UPDATED — stream chunks into the assistant row matched by id (never append a duplicate bubble).
+  const appendAssistantChunk = useCallback((chunk) => {
     if (stopRef.current) return;
     if (!isStreamingRef.current) return;
 
-    // Hide typing indicator once the first chunk arrives.
-    setIsTyping(false);
-
     const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
+    const assistantId = streamAssistantMessageIdRef.current;
+    if (!assistantId) return;
 
-    setChats(prev =>
-      prev.map(chat => {
+    setChats((prev) =>
+      prev.map((chat) => {
         if (chat.id !== targetChatId) return chat;
 
-        const last = chat.messages[chat.messages.length - 1];
-
-        if (last && last.role === 'assistant' && streamingRef.current) {
-          return {
-            ...chat,
-            messages: [
-              ...chat.messages.slice(0, -1),
-              { ...last, content: last.content + chunk }
-            ]
-          };
+        const idx = chat.messages.findIndex(
+          (m) => m.id === assistantId && m.role === 'assistant'
+        );
+        if (idx === -1) {
+          return chat;
         }
 
-        streamingRef.current = true;
-
+        const row = chat.messages[idx];
         return {
           ...chat,
-          messages: [
-            ...chat.messages,
-            { id: nextId(), role: 'assistant', content: chunk }
-          ]
+          messages: chat.messages.map((m, i) =>
+            i === idx
+              ? { ...m, content: (row.content ?? '') + chunk, streaming: true }
+              : m
+          ),
         };
       })
     );
-  }, [finalizeStream]);
+  }, []);
+
+  const handleStreamBody = useCallback(
+    (raw) => {
+      if (raw == null || raw === '') return;
+
+      let event;
+      try {
+        event = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch {
+        return;
+      }
+
+      const expectedId = activeClientStreamIdRef.current;
+      if (!expectedId || event.clientStreamId !== expectedId) return;
+
+      const expectedAssistant = streamAssistantMessageIdRef.current;
+      if (
+        event.assistantMessageId &&
+        expectedAssistant &&
+        event.assistantMessageId !== expectedAssistant
+      ) {
+        return;
+      }
+
+      switch (event.type) {
+        case 'chunk':
+          appendAssistantChunk(event.chunk ?? '');
+          break;
+        case 'error':
+          appendAssistantChunk(event.message ?? 'Error');
+          finalizeStream();
+          break;
+        case 'done':
+          if (isStreamingRef.current) finalizeStream();
+          break;
+        default:
+          break;
+      }
+    },
+    [appendAssistantChunk, finalizeStream]
+  );
 
   useEffect(() => {
     connectWebSocket({
-      onMessage: handleChunk,
+      onMessage: handleStreamBody,
       onConnect: () => {
         setConnected(true);
         setStatusText('Connected');
@@ -111,40 +168,130 @@ export default function App() {
     });
 
     return () => disconnectWebSocket();
-  }, [handleChunk]);
+  }, [handleStreamBody]);
 
   function handleSend(text) {
     if (isStreamingRef.current || !connected) {
       return;
     }
 
-    streamingRef.current = false;
+    const clientStreamId = crypto.randomUUID();
+    const userMessageId = crypto.randomUUID();
+    const assistantMessageId = crypto.randomUUID();
+
+    const chatId = activeChatIdRef.current;
+    const snapshot = chatsRef.current.find((c) => c.id === chatId);
+    const priorMessages = buildPriorDtos(snapshot?.messages || []);
+
     stopRef.current = false;
-    streamChatIdRef.current = activeChatIdRef.current;
+    streamChatIdRef.current = chatId;
+    activeClientStreamIdRef.current = clientStreamId;
+    streamAssistantMessageIdRef.current = assistantMessageId;
     setStreamingState(true);
-    setIsTyping(true);
 
-    setChats(prev =>
-      prev.map(chat => {
-        if (chat.id !== activeChatId) return chat;
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== chatId) return chat;
 
-        const isFirstMessage = chat.messages.length === 0;
+        const isFirstCompleteTurn =
+          buildPriorDtos(chat.messages).length === 0;
 
         return {
           ...chat,
-          title: isFirstMessage
-            ? text.slice(0, 20)
-            : chat.title,
+          title: isFirstCompleteTurn ? text.slice(0, 20) : chat.title,
           messages: [
             ...chat.messages,
-            { id: nextId(), role: 'user', content: text }
-          ]
+            {
+              id: userMessageId,
+              role: 'user',
+              content: text,
+              responseTo: null,
+              editing: false,
+              streaming: false,
+            },
+            {
+              id: assistantMessageId,
+              role: 'assistant',
+              content: '',
+              responseTo: userMessageId,
+              editing: false,
+              streaming: true,
+            },
+          ],
         };
       })
     );
 
-    sendMessage(text);
+    // NEW — structured payload (assistant bubble id + correlation id).
+    sendMessage({
+      type: 'NEW',
+      clientStreamId,
+      messageId: assistantMessageId,
+      content: text,
+      priorMessages,
+    });
   }
+
+  const handleEditSave = useCallback(
+    (userMessageId, newText) => {
+      if (isStreamingRef.current || !connected) return false;
+
+      const trimmed = (newText ?? '').trim();
+      if (!trimmed) return false;
+
+      const chatId = activeChatIdRef.current;
+      const chatSnapshot = chatsRef.current.find((c) => c.id === chatId);
+      if (!chatSnapshot) return false;
+
+      const msgs = chatSnapshot.messages;
+      const userIdx = msgs.findIndex((m) => m.id === userMessageId && m.role === 'user');
+      if (userIdx === -1) return false;
+
+      const paired = msgs[userIdx + 1];
+      if (!paired || paired.role !== 'assistant' || paired.responseTo !== userMessageId) {
+        return false;
+      }
+
+      const clientStreamId = crypto.randomUUID();
+      const assistantMessageId = paired.id;
+      const priorMessages = buildPriorDtos(msgs.slice(0, userIdx));
+
+      stopRef.current = false;
+      streamChatIdRef.current = chatId;
+      activeClientStreamIdRef.current = clientStreamId;
+      streamAssistantMessageIdRef.current = assistantMessageId;
+      setStreamingState(true);
+
+      setChats((prev) =>
+        prev.map((chat) => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map((m) => {
+              if (m.id === userMessageId && m.role === 'user') {
+                return { ...m, content: trimmed, editing: false };
+              }
+              if (m.id === assistantMessageId && m.role === 'assistant') {
+                return { ...m, content: '', streaming: true };
+              }
+              return m;
+            }),
+          };
+        })
+      );
+
+      sendMessage({
+        type: 'EDIT',
+        clientStreamId,
+        messageId: assistantMessageId,
+        content: trimmed,
+        editTargetMessageId: userMessageId,
+        priorMessages,
+      });
+      return true;
+    },
+    [connected, setStreamingState]
+  );
 
   function stopResponse() {
     if (!isStreamingRef.current) return;
@@ -157,15 +304,15 @@ export default function App() {
     const newChat = {
       id: Date.now(),
       title: 'New Chat',
-      messages: []
+      messages: [],
     };
 
-    setChats(prev => [newChat, ...prev]);
+    setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
   }
 
   function deleteChat(chatId) {
-    setChats(prev => prev.filter(c => c.id !== chatId));
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
 
     if (chatId === activeChatId) {
       setActiveChatId(null);
@@ -176,10 +323,8 @@ export default function App() {
     const newName = prompt('Enter new name');
     if (!newName) return;
 
-    setChats(prev =>
-      prev.map(c =>
-        c.id === chatId ? { ...c, title: newName } : c
-      )
+    setChats((prev) =>
+      prev.map((c) => (c.id === chatId ? { ...c, title: newName } : c))
     );
   }
 
@@ -191,18 +336,20 @@ export default function App() {
         </button>
 
         <div className="chat-list">
-          {chats.map(chat => (
+          {chats.map((chat) => (
             <div
               key={chat.id}
               className={`chat-item ${chat.id === activeChatId ? 'active' : ''}`}
             >
-              <span onClick={() => setActiveChatId(chat.id)}>
-                {chat.title}
-              </span>
+              <span onClick={() => setActiveChatId(chat.id)}>{chat.title}</span>
 
               <div className="chat-actions">
-                <button onClick={() => renameChat(chat.id)}>✏️</button>
-                <button onClick={() => deleteChat(chat.id)}>🗑</button>
+                <button type="button" onClick={() => renameChat(chat.id)}>
+                  ✏️
+                </button>
+                <button type="button" onClick={() => deleteChat(chat.id)}>
+                  🗑
+                </button>
               </div>
             </div>
           ))}
@@ -211,7 +358,6 @@ export default function App() {
 
       {/* CHAT AREA */}
       <div className="chat-section">
-
         <header className="app-header">
           <h1 className="app-title">Talk To Me</h1>
           <span className={`status-badge ${connected ? 'online' : 'offline'}`}>
@@ -221,7 +367,8 @@ export default function App() {
 
         <ChatWindow
           messages={activeChat?.messages || []}
-          isTyping={isTyping}
+          isStreaming={isStreaming}
+          onEditSave={handleEditSave}
         />
 
         <InputBox

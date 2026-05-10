@@ -90,6 +90,169 @@ body {
   align-items: flex-end;
 }
 
+/* EDIT FEATURE — keep hover actions aligned without changing overall bubble alignment */
+.user-bubble-wrap {
+  position: relative;
+}
+
+.user-bubble-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* User message edit — always visible (hover-only breaks touch / discoverability) */
+/* .msg-edit-btn {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  opacity: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+} */
+/* =========================================================
+/* ===== ICON ONLY EDIT BUTTON ===== */
+.msg-edit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: transparent;
+  border: none;
+  outline: none;
+
+  color: #111827;
+
+  cursor: pointer;
+
+  padding: 2px;
+
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease,
+    color 0.15s ease;
+}
+/* ===== EDIT ICON ===== */
+.edit-icon {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.msg-edit-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+
+/* ===== HOVER EFFECT ===== */
+.msg-edit-btn:hover:not(:disabled) {
+  color: #000000;
+  transform: scale(1.1);
+}
+
+
+.chat-bubble.user:hover .msg-edit-btn:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* EDIT FEATURE — inline editor */
+.user-edit-panel {
+  width: min(520px, 72vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.user-edit-textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-family: inherit;
+  line-height: 1.5;
+  outline: none;
+  /* background: rgba(255, 255, 255, 0.08); */
+  background: #e5e7e5;
+  /* color: #fff; */
+  color: #000000;
+}
+
+.user-edit-textarea:focus {
+  border-color: rgba(255, 255, 255, 0.65);
+  background: rgba(98, 70, 70, 0.12);
+}
+
+.user-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.user-edit-save,
+.user-edit-cancel {
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.user-edit-save {
+  background: #2563eb;
+  color: #ffffff;
+
+  border: 1px solid #3b82f6;
+
+  transition:
+    background 0.15s ease,
+    transform 0.1s ease,
+    border-color 0.15s ease;
+}
+/* .user-edit-save:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #2563eb;
+
+  transform: translateY(-1px);
+} */
+
+
+.user-edit-cancel {
+  background:rgba(148,163,184,0.08);
+
+  color: #cbd5e1;
+
+  border: 1px solid rgba(148,163,184,0.25);
+
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
+}
+/* .user-edit-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+
+  border-color: rgba(255, 255, 255, 0.24);
+
+  transform: translateY(-1px);
+} */
+
+.user-edit-save:disabled,
+.user-edit-cancel:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .chat-bubble.assistant {
   align-self: flex-start;
   align-items: flex-start;

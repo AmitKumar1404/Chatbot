@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import reactor.core.Disposable;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,23 +20,6 @@ public class ActiveStreamRegistry {
     private final ConcurrentMap<String, ActiveStream> activeStreams = new ConcurrentHashMap<>();
 
     /**
-     * Registers an active stream for one websocket principal.
-     * If a previous stream exists, it is cancelled first to avoid overlap.
-     */
-    public void register(String principalName, String streamId, Disposable disposable) {
-        activeStreams.compute(principalName, (key, existing) -> {
-            if (existing != null) {
-                log.warn("Replacing active stream — principal={}, oldStreamId={}, newStreamId={}",
-                        principalName, existing.streamId(), streamId);
-                existing.disposable().dispose();
-            }
-            return new ActiveStream(streamId, disposable);
-        });
-
-        log.info("Stream started — principal={}, streamId={}", principalName, streamId);
-    }
-
-    /**
      * Cancels any existing stream then creates the next one inside the same
      * {@link ConcurrentHashMap#compute(java.lang.Object, java.util.function.BiFunction)} critical section.
      * <p>
@@ -43,7 +27,9 @@ public class ActiveStreamRegistry {
      * {@code update(streamSubscription)} ran, which left the Ollama pipeline subscribed
      * with no way for STOP to cancel it.
      */
-    public void replaceAndStart(String principalName, String streamId, Supplier<Disposable> subscribeSupplier) {
+    // UPDATED — carries clientStreamId for downstream DONE correlation on STOP
+    public void replaceAndStart(String principalName, String streamId, String clientStreamId,
+                                Supplier<Disposable> subscribeSupplier) {
         activeStreams.compute(principalName, (key, existing) -> {
             if (existing != null) {
                 log.warn("Replacing active stream — principal={}, oldStreamId={}, newStreamId={}",
@@ -51,25 +37,29 @@ public class ActiveStreamRegistry {
                 existing.disposable().dispose();
             }
             Disposable d = Objects.requireNonNull(subscribeSupplier.get(), "subscribeSupplier");
-            log.info("Stream started — principal={}, streamId={}", principalName, streamId);
-            return new ActiveStream(streamId, d);
+            log.info("Stream started — principal={}, streamId={}, clientStreamId={}",
+                    principalName, streamId, clientStreamId);
+            return new ActiveStream(streamId, clientStreamId, d);
         });
     }
 
     /**
      * Cancels the active stream for one websocket principal.
+     *
+     * @return the client stream id that was active (for sending a matching DONE envelope).
      */
-    public boolean cancel(String principalName, String reason) {
+    // UPDATED — returns client stream id for UI correlation
+    public Optional<String> cancel(String principalName, String reason) {
         ActiveStream removed = activeStreams.remove(principalName);
         if (removed == null) {
             log.info("No active stream to cancel — principal={}, reason={}", principalName, reason);
-            return false;
+            return Optional.empty();
         }
 
         removed.disposable().dispose();
-        log.info("Stream cancelled — principal={}, streamId={}, reason={}",
-                principalName, removed.streamId(), reason);
-        return true;
+        log.info("Stream cancelled — principal={}, streamId={}, clientStreamId={}, reason={}",
+                principalName, removed.streamId(), removed.clientStreamId(), reason);
+        return Optional.ofNullable(removed.clientStreamId());
     }
 
     /**
@@ -88,6 +78,7 @@ public class ActiveStreamRegistry {
         return removed.get();
     }
 
-    private record ActiveStream(String streamId, Disposable disposable) {
+    // UPDATED — ActiveStream now tracks clientStreamId alongside server stream id
+    private record ActiveStream(String streamId, String clientStreamId, Disposable disposable) {
     }
 }

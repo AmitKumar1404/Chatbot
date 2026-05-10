@@ -15,12 +15,8 @@ export function connectWebSocket({ onMessage, onConnect, onError }) {
 
       const sub = stompClient.subscribe('/user/queue/messages', (message) => {
         console.debug('[WS] Message received on /user/queue/messages:', message.body);
-        const body = message.body;
-        if (body === '[DONE]') {
-          onMessage('[DONE]');
-          return;
-        }
-        onMessage(body);
+        // Raw JSON string — App.jsx owns parse + correlation (clientStreamId / assistantMessageId).
+        onMessage(message.body);
       });
       console.log('[WS] Subscribed to /user/queue/messages — id:', sub.id);
 
@@ -50,7 +46,15 @@ export function connectWebSocket({ onMessage, onConnect, onError }) {
   stompClient.activate();
 }
 
-export function sendMessage(content) {
+const JSON_CT = { 'content-type': 'application/json' };
+
+/**
+ * // UPDATED
+ * Publishes JSON payloads matching server {@code ChatStompPayload}:
+ * - NEW: {@code { type, clientStreamId, messageId, content, priorMessages }}
+ * - EDIT: adds {@code editTargetMessageId}
+ */
+export function sendMessage(payloadObject) {
   if (!stompClient || !stompClient.connected) {
     console.warn('WebSocket not connected');
     return;
@@ -58,7 +62,8 @@ export function sendMessage(content) {
 
   stompClient.publish({
     destination: '/app/chat',
-    body: content,
+    body: JSON.stringify(payloadObject),
+    headers: JSON_CT,
   });
 }
 
@@ -70,7 +75,8 @@ export function sendStopSignal() {
 
   stompClient.publish({
     destination: '/app/chat/stop',
-    body: 'STOP',
+    body: JSON.stringify('STOP'),
+    headers: JSON_CT,
   });
 }
 
