@@ -1,9 +1,12 @@
 package com.chatbot.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.messaging.converter.MappingJackson2MessageConverter;
+import org.springframework.messaging.converter.MessageConverter;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -12,6 +15,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 
 import java.security.Principal;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,6 +24,23 @@ import java.util.UUID;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private static final Logger log = LoggerFactory.getLogger(WebSocketConfig.class);
+
+    private final ObjectMapper objectMapper;
+
+    public WebSocketConfig(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * // NEW — allow {@code @Payload} JSON → {@link com.chatbot.dto.ChatStompPayload} on {@code /app/chat}.
+     */
+    @Override
+    public boolean configureMessageConverters(List<MessageConverter> messageConverters) {
+        MappingJackson2MessageConverter jackson = new MappingJackson2MessageConverter();
+        jackson.setObjectMapper(objectMapper);
+        messageConverters.add(jackson);
+        return false;
+    }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {

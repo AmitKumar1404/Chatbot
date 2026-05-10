@@ -29,7 +29,8 @@ public class WebSocketSessionCleanupListener {
             return;
         }
 
-        boolean cancelled = activeStreamRegistry.cancel(principal.getName(), "WebSocket session disconnected");
+        // UPDATED — cancel now returns Optional clientStreamId
+        boolean cancelled = activeStreamRegistry.cancel(principal.getName(), "WebSocket session disconnected").isPresent();
         if (cancelled) {
             log.info("Cleanup completed after disconnect — principal={}, sessionId={}",
                     principal.getName(), accessor.getSessionId());
