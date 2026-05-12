@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, memo, useCallback } from "react";
+import { Copy, Check } from "lucide-react";
 
 const UserBubble = memo(function UserBubble({
   msg,
@@ -9,24 +10,52 @@ const UserBubble = memo(function UserBubble({
   onBeginEdit,
   onCancelEdit,
   onCommitEdit,
+  onCopy, // ✅ ADDED: copy handler
+  copiedId,
 }) {
   return (
     <div className="chat-bubble user user-bubble-wrap">
       {!isEditing && (
         <>
-          {/* <span className="bubble-label">You</span> */}
-
+          {/* MESSAGE TEXT */}
           <p className="bubble-text">{msg.content}</p>
 
-          <button
-            type="button"
-            className="msg-edit-btn"
-            title="Edit message"
-            disabled={isStreaming}
-            onClick={() => onBeginEdit(msg)}
-          >
-            <span className="edit-icon">✎</span>
-          </button>
+          {/* =========================
+              ACTION ROW (EDIT + COPY)
+              FIX: horizontal under message
+          ========================= */}
+          <div className="msg-actions-row">
+            {/* ✏️ EDIT BUTTON */}
+            <button
+              type="button"
+              className="msg-edit-btn"
+              disabled={isStreaming}
+              onClick={() => onBeginEdit(msg)}
+            >
+              <span className="tooltip-text">Edit</span>
+              <span className="edit-icon">✎</span>
+            </button>
+            <button
+              type="button"
+              className="msg-copy-btn"
+              onClick={() => onCopy(msg.content, msg.id)}
+            >
+              {/* <span className="tooltip-text">Copy</span> */}
+              <span className="tooltip-text">
+                {copiedId === msg.id ? "Copied" : "Copy"}
+              </span>
+              {/* <Copy size={16} strokeWidth={2} /> */}
+              {copiedId === msg.id && window.innerWidth <= 768 ? (
+                <Check
+                  className="copied-check-icon"
+                  size={16}
+                  strokeWidth={2.5}
+                />
+              ) : (
+                <Copy size={16} strokeWidth={2} />
+              )}
+            </button>
+          </div>
         </>
       )}
 
@@ -63,11 +92,14 @@ const UserBubble = memo(function UserBubble({
   );
 });
 
-const AssistantBubble = memo(function AssistantBubble({ msg }) {
+const AssistantBubble = memo(function AssistantBubble({
+  msg,
+  onCopy,
+  copiedId,
+}) {
   if (msg.streaming && !(msg.content ?? "").trim()) {
     return (
       <div className="chat-bubble assistant typing">
-        {/* <span className="bubble-label">Assistant</span> */}
         <div className="typing-dots" aria-label="Assistant is typing">
           <span />
           <span />
@@ -78,9 +110,34 @@ const AssistantBubble = memo(function AssistantBubble({ msg }) {
   }
 
   return (
-    <div className={`chat-bubble ${msg.role}`}>
-      {/* <span className="bubble-label">Assistant</span> */}
+    <div className="chat-bubble assistant">
+      {/* MESSAGE TEXT */}
       <p className="bubble-text">{msg.content}</p>
+
+      {/* 📋 COPY BUTTON */}
+      {msg.content?.trim() && !msg.streaming && (
+        <div className="msg-actions-row">
+          <button
+            type="button"
+            className="msg-copy-btn"
+            onClick={() => onCopy(msg.content, msg.id)}
+          >
+            <span className="tooltip-text">
+              {copiedId === msg.id ? "Copied" : "Copy"}
+            </span>
+            {/* <Copy size={16} strokeWidth={2} /> */}
+            {copiedId === msg.id && window.innerWidth <= 768 ? (
+              <Check
+                className="copied-check-icon"
+                size={16}
+                strokeWidth={2.5}
+              />
+            ) : (
+              <Copy size={16} strokeWidth={2} />
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 });
@@ -92,6 +149,23 @@ export default function ChatWindow({ messages, isStreaming, onEditSave }) {
 
   const [editingUserId, setEditingUserId] = useState(null);
   const [draft, setDraft] = useState("");
+  const [copiedId, setCopiedId] = useState(null);
+
+  // ===============================
+  // 📋 COPY FUNCTION (NEW ADDITION)
+  // ===============================
+  const handleCopy = useCallback(async (text, id) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+
+      setTimeout(() => {
+        setCopiedId(null);
+      }, 1500);
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  }, []);
 
   useEffect(() => {
     const el = scrollRootRef.current;
@@ -155,11 +229,20 @@ export default function ChatWindow({ messages, isStreaming, onEditSave }) {
               onBeginEdit={beginEdit}
               onCancelEdit={cancelEdit}
               onCommitEdit={commitEdit}
+              onCopy={handleCopy} // ✅ ADDED
+              copiedId={copiedId}
             />
           );
         }
 
-        return <AssistantBubble key={msg.id} msg={msg} />;
+        return (
+          <AssistantBubble
+            key={msg.id}
+            msg={msg}
+            onCopy={handleCopy} // ✅ ADDED
+            copiedId={copiedId}
+          />
+        );
       })}
       <div ref={bottomRef} />
     </div>

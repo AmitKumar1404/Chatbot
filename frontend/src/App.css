@@ -101,43 +101,6 @@ body {
   gap: 10px;
 }
 
-/* User message edit — always visible (hover-only breaks touch / discoverability) */
-/* .msg-edit-btn {
-  flex-shrink: 0;
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  cursor: pointer;
-  opacity: 1;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
-} */
-/* =========================================================
-/* ===== ICON ONLY EDIT BUTTON ===== */
-.msg-edit-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  background: transparent;
-  border: none;
-  outline: none;
-
-  color: #111827;
-
-  cursor: pointer;
-
-  padding: 2px;
-
-  transition:
-    transform 0.15s ease,
-    opacity 0.15s ease,
-    color 0.15s ease;
-}
 /* ===== EDIT ICON ===== */
 .edit-icon {
   font-size: 18px;
@@ -145,21 +108,9 @@ body {
   line-height: 1;
 }
 
+/* ✅ DISABLED EDIT BUTTON */
 .msg-edit-btn:disabled {
-  opacity: 0.35;
   cursor: not-allowed;
-}
-
-
-/* ===== HOVER EFFECT ===== */
-.msg-edit-btn:hover:not(:disabled) {
-  color: #000000;
-  transform: scale(1.1);
-}
-
-
-.chat-bubble.user:hover .msg-edit-btn:not(:disabled) {
-  transform: translateY(-1px);
 }
 
 /* EDIT FEATURE — inline editor */
@@ -181,9 +132,7 @@ body {
   font-family: inherit;
   line-height: 1.5;
   outline: none;
-  /* background: rgba(255, 255, 255, 0.08); */
   background: #e5e7e5;
-  /* color: #fff; */
   color: #000000;
 }
 
@@ -219,13 +168,6 @@ body {
     transform 0.1s ease,
     border-color 0.15s ease;
 }
-/* .user-edit-save:hover:not(:disabled) {
-  background: #1d4ed8;
-  border-color: #2563eb;
-
-  transform: translateY(-1px);
-} */
-
 
 .user-edit-cancel {
   background:rgba(148,163,184,0.08);
@@ -239,13 +181,6 @@ body {
     border-color 0.15s ease,
     transform 0.1s ease;
 }
-/* .user-edit-cancel:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-
-  border-color: rgba(255, 255, 255, 0.24);
-
-  transform: translateY(-1px);
-} */
 
 .user-edit-save:disabled,
 .user-edit-cancel:disabled {
@@ -400,7 +335,7 @@ body {
   }
 }
 
-/* ✅ CHANGE: Sidebar Layout */
+/* CHANGE: Sidebar Layout */
 .app-layout {
   display: flex;
   height: 100dvh;
@@ -484,4 +419,240 @@ body {
 /* 🔥 STOP STATE */
 .send-btn:has(:not([type="submit"])) {
   background: #dc2626;
+}
+
+/* =========================
+   ACTION BUTTON ROW (NEW)
+========================= */
+
+.msg-actions-row {
+  display: flex;
+  flex-direction: row;   /* horizontal icons */
+  gap: 10px;
+  margin-top: 6px;       /* message ke neeche spacing */
+  justify-content: flex-end; /* right side align (optional) */
+}
+
+.msg-edit-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 27px;
+  height: 27px;
+
+  padding: 0;
+
+  border-radius: 50%;
+
+  font-size: 14px;
+
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+
+  /* desktop pe hidden */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    visibility 0.18s ease;
+}
+/* ✅ hover pe visible */
+.chat-bubble:hover .msg-edit-btn {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* ✅ USER/REQUEST MESSAGE → CIRCLE */
+.chat-bubble.user .msg-edit-btn:hover,
+.chat-bubble.user .msg-edit-btn:active,
+.chat-bubble.user .msg-edit-btn:focus-visible {
+  opacity: 1;
+
+  background: rgba(156, 163, 175, 0.18);
+
+  border-radius: 50%;
+
+  transform: scale(1.08);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ✅ ASSISTANT/RESPONSE MESSAGE → SQUARE */
+.chat-bubble.assistant .msg-edit-btn:hover,
+.chat-bubble.assistant .msg-edit-btn:active,
+.chat-bubble.assistant .msg-edit-btn:focus-visible {
+  opacity: 1;
+
+  background: rgba(156, 163, 175, 0.18);
+
+  border-radius: 8px;
+
+  transform: scale(1.08);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* disabled state */
+.msg-edit-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+ /*📋 COPY BUTTON */
+.msg-copy-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 27px;
+  height: 27px;
+
+  padding: 0;
+
+  border-radius: 50%;
+
+  color: #9ca3af;
+
+  opacity: 0;
+
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+
+    transition:
+  opacity 0.18s ease,
+  transform 0.18s ease,
+  background-color 0.18s ease;
+}
+
+/* Desktop hover show */
+.chat-bubble:hover .msg-copy-btn {
+  opacity: 1;
+}
+
+/* ✅ USER/REQUEST MESSAGE → CIRCLE */
+.chat-bubble.user .msg-copy-btn:hover,
+.chat-bubble.user .msg-copy-btn:active,
+.chat-bubble.user .msg-copy-btn:focus-visible {
+  opacity: 1;
+
+  background: rgba(156, 163, 175, 0.18);
+
+  border-radius: 50%;
+
+  transform: scale(1.08);
+}
+
+/* ✅ ASSISTANT/RESPONSE MESSAGE → SQUARE */
+.chat-bubble.assistant .msg-copy-btn:hover,
+.chat-bubble.assistant .msg-copy-btn:active,
+.chat-bubble.assistant .msg-copy-btn:focus-visible {
+  opacity: 1;
+
+  background: rgba(156, 163, 175, 0.18);
+
+  border-radius: 8px;
+
+  transform: scale(1.08);
+}
+/* hover effect */
+.msg-edit-btn:hover,
+.msg-copy-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+   /* 🔥 SHOW COPY ICON ALWAYS ON MOBILE */
+
+@media (max-width: 768px) {
+
+  /* ✅ FORCE SHOW */
+  .msg-copy-btn {
+    opacity: 1 !important;
+  }
+
+  /* safety override */
+  .chat-bubble:hover .msg-copy-btn {
+    opacity: 1 !important;
+  }
+
+  /* ✅ EDIT ICON MOBILE PE ALWAYS SHOW */
+.msg-edit-btn {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.chat-bubble:hover .msg-edit-btn {
+  opacity: 1 !important;
+}
+/* ✅ HIDE TOOLTIP ON MOBILE */
+.tooltip-text {
+  display: none !important;
+}
+/* ✅ copied hone par green check icon */
+.copied-check-icon {
+  color: #22c55e;
+}
+}
+.msg-edit-btn,
+.msg-copy-btn {
+  position: relative;
+}
+
+/* hidden by default */
+.tooltip-text {
+  position: absolute;
+
+  top: 95%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+
+  background: #e11d48;
+  color: #ffffff;
+
+  font-size: 11px;
+  font-weight: 500;
+
+  padding: 5px 8px;
+  border-radius: 6px;
+
+  white-space: nowrap;
+
+  opacity: 0;
+  visibility: hidden;
+
+  pointer-events: none;
+
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    visibility 0.18s ease;
+
+  z-index: 100;
+}
+
+/* show on hover */
+.msg-edit-btn:hover .tooltip-text,
+.msg-copy-btn:hover .tooltip-text {
+  opacity: 1;
+  visibility: visible;
+
+  transform: translateX(-50%) translateY(0);
 }
