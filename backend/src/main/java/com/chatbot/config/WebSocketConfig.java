@@ -1,38 +1,31 @@
 package com.chatbot.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.messaging.converter.MappingJackson2MessageConverter;
 import org.springframework.messaging.converter.MessageConverter;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
-import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
-import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 
-import java.security.Principal;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
-    private static final Logger log = LoggerFactory.getLogger(WebSocketConfig.class);
-
     private final ObjectMapper objectMapper;
+    private final StompJwtChannelInterceptor stompJwtChannelInterceptor;
 
-    public WebSocketConfig(ObjectMapper objectMapper) {
+    public WebSocketConfig(ObjectMapper objectMapper, StompJwtChannelInterceptor stompJwtChannelInterceptor) {
         this.objectMapper = objectMapper;
+        this.stompJwtChannelInterceptor = stompJwtChannelInterceptor;
     }
 
     /**
-     * // NEW — allow {@code @Payload} JSON → {@link com.chatbot.dto.ChatStompPayload} on {@code /app/chat}.
+     * Allow {@code @Payload} JSON → {@link com.chatbot.dto.ChatStompPayload} on {@code /app/chat}.
      */
     @Override
     public boolean configureMessageConverters(List<MessageConverter> messageConverters) {
@@ -43,19 +36,14 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     }
 
     @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        registration.interceptors(stompJwtChannelInterceptor);
+    }
+
+    @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws-chat")
-                .setAllowedOriginPatterns("*")
-                .setHandshakeHandler(new DefaultHandshakeHandler() {
-                    @Override
-                    protected Principal determineUser(ServerHttpRequest request,
-                                                     WebSocketHandler wsHandler,
-                                                     Map<String, Object> attributes) {
-                        String principalName = UUID.randomUUID().toString();
-                        log.debug("WebSocket handshake — assigned principal: {}", principalName);
-                        return () -> principalName;
-                    }
-                });
+                .setAllowedOriginPatterns("*");
     }
 
     @Override

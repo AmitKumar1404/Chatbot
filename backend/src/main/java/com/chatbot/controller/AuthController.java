@@ -10,6 +10,8 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -52,5 +54,18 @@ public class AuthController {
                 .username(request.getUsername())
                 .build();
         return ResponseEntity.status(ResponseCode.OK).body(response);
+    }
+
+    /**
+     * Validates the JWT (via {@code JwtFilter}) and returns the current username for client bootstrap / refresh.
+     */
+    @GetMapping("/me")
+    public ResponseEntity<AuthResponse> me(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(ResponseCode.UNAUTHORIZED).build();
+        }
+        return ResponseEntity.ok(AuthResponse.builder()
+                .username(authentication.getName())
+                .build());
     }
 }
