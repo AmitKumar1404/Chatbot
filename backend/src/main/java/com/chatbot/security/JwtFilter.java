@@ -16,6 +16,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 import static com.chatbot.constant.AppConstants.AUTH_BASE_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_LOGIN_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_REGISTER_PATH;
 import static com.chatbot.constant.AppConstants.AUTHORIZATION_HEADER;
 import static com.chatbot.constant.AppConstants.BEARER_PREFIX;
 import static com.chatbot.constant.AppConstants.H2_CONSOLE_PATH;
@@ -38,7 +40,7 @@ public class JwtFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain) throws ServletException, IOException {
 
         String path = request.getRequestURI();
-        if (path.startsWith(AUTH_BASE_PATH + "/") || path.startsWith(H2_CONSOLE_PATH)) {
+        if (isJwtOptionalHttpPath(path)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -65,5 +67,15 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Paths where the filter must not require a JWT (login/register, tooling).
+     * Note: {@code /auth/me} is <em>not</em> listed here — it relies on this filter to populate the security context.
+     */
+    private static boolean isJwtOptionalHttpPath(String path) {
+        return path.endsWith(AUTH_BASE_PATH + AUTH_LOGIN_PATH)
+                || path.endsWith(AUTH_BASE_PATH + AUTH_REGISTER_PATH)
+                || path.startsWith(H2_CONSOLE_PATH);
     }
 }

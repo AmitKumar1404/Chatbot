@@ -1,12 +1,24 @@
 import { Client } from '@stomp/stompjs';
+import { wsChatUrl } from './apiConfig';
 
 let stompClient = null;
 
-export function connectWebSocket({ onMessage, onConnect, onError }) {
+export function connectWebSocket({ accessToken, onMessage, onConnect, onError }) {
+  if (!accessToken) {
+    console.warn('[WS] connectWebSocket called without accessToken');
+    return;
+  }
+
+  disconnectWebSocket();
+
   stompClient = new Client({
-    brokerURL: 'ws://localhost:9999/api/v1/ws-chat',
+    brokerURL: wsChatUrl(),
 
     reconnectDelay: 5000,
+
+    connectHeaders: {
+      Authorization: `Bearer ${accessToken}`,
+    },
 
     debug: (msg) => console.debug('[STOMP debug]', msg),
 
@@ -15,7 +27,6 @@ export function connectWebSocket({ onMessage, onConnect, onError }) {
 
       const sub = stompClient.subscribe('/user/queue/messages', (message) => {
         console.debug('[WS] Message received on /user/queue/messages:', message.body);
-        // Raw JSON string — App.jsx owns parse + correlation (clientStreamId / assistantMessageId).
         onMessage(message.body);
       });
       console.log('[WS] Subscribed to /user/queue/messages — id:', sub.id);
@@ -48,12 +59,6 @@ export function connectWebSocket({ onMessage, onConnect, onError }) {
 
 const JSON_CT = { 'content-type': 'application/json' };
 
-/**
- * // UPDATED
- * Publishes JSON payloads matching server {@code ChatStompPayload}:
- * - NEW: {@code { type, clientStreamId, messageId, content, priorMessages }}
- * - EDIT: adds {@code editTargetMessageId}
- */
 export function sendMessage(payloadObject) {
   if (!stompClient || !stompClient.connected) {
     console.warn('WebSocket not connected');
@@ -83,5 +88,6 @@ export function sendStopSignal() {
 export function disconnectWebSocket() {
   if (stompClient) {
     stompClient.deactivate();
+    stompClient = null;
   }
 }
