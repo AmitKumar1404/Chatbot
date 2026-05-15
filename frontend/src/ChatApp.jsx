@@ -35,6 +35,7 @@ export default function ChatApp() {
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const stopRef = useRef(false);
   const isStreamingRef = useRef(false);
@@ -58,6 +59,8 @@ export default function ChatApp() {
   }, []);
 
   const activeChat = chats.find((c) => c.id === activeChatId);
+  const userInitial = username?.charAt(0)?.toUpperCase() || "?";
+  // const firstName = username?.split(" ")[0] || "";
 
   const finalizeStream = useCallback(() => {
     const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
@@ -373,12 +376,38 @@ export default function ChatApp() {
             </div>
           ))}
         </div>
+        <div className="sidebar-footer">
+          <div
+            className="profile-wrapper"
+            onClick={() => setShowProfileMenu((prev) => !prev)}
+          >
+            <div className="profile-circle">{userInitial}</div>
+            {/* <div className="profile-circle">{userInitial}</div>
+
+            <span className="profile-name">{firstName}</span> */}
+
+            {showProfileMenu && (
+              <div className="profile-dropdown">
+                <button
+                  type="button"
+                  className="profile-logout-btn"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowLogoutModal(true);
+                  }}
+                >
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="chat-section">
         <header className="app-header">
           <h1 className="app-title">Talk To Me</h1>
-          <div className="header-actions">
+          {/* <div className="header-actions">
             <span className="header-user" title={username || ""}>
               {username ? `Signed in as ${username}` : ""}
             </span>
@@ -390,7 +419,7 @@ export default function ChatApp() {
             {/* <button type="button" className="logout-btn" onClick={() => logout()}>
               Log out
             </button>*/}
-            {/* <button
+          {/* <button
               type="button"
               className="logout-btn"
               onClick={() => {
@@ -405,13 +434,20 @@ export default function ChatApp() {
             >
               Log out
             </button> */}
-            <button
+          {/* <button
               type="button"
               className="logout-btn"
               onClick={() => setShowLogoutModal(true)}
             >
               Log out
             </button>
+          </div> */}
+          <div className="header-actions">
+            <span
+              className={`status-badge ${connected ? "online" : "offline"}`}
+            >
+              {statusText}
+            </span>
           </div>
         </header>
         {showLogoutModal && (
