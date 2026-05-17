@@ -356,6 +356,11 @@ body {
   height: 100dvh;
 }
 
+.sidebar.sidebar-busy {
+  pointer-events: none;
+  opacity: 0.85;
+}
+
 
 .new-chat-btn {
   padding: 10px;
@@ -377,9 +382,19 @@ body {
 }
 
 .chat-item {
-  padding: 8px 10px;
-  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  width: 100%;
+
+  padding: 10px 12px;
+
+  border-radius: 8px;
+
   cursor: pointer;
+
+  transition: background 0.15s ease;
 }
 
 .chat-item:hover {
@@ -389,6 +404,15 @@ body {
 .chat-item.active {
   background: #374151;
 }
+.chat-item span {
+  flex: 1;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  cursor: pointer;
+}
 
 .chat-section {
   flex: 1;
@@ -396,11 +420,11 @@ body {
   flex-direction: column;
 }
 /* ✅ NEW: actions buttons */
-.chat-item {
+/* .chat-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
+} */
 
 .chat-actions {
   display: flex;
