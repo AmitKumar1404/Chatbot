@@ -8,6 +8,13 @@ import {
   disconnectWebSocket,
 } from "./websocket";
 import { useAuth } from "./context/AuthContext";
+import {
+  fetchChatSessions,
+  createChatSession,
+  fetchSessionMessages,
+  deleteChatSessionApi,
+  updateChatSessionTitleApi,
+} from "./chatApi";
 import "./App.css";
 
 function buildPriorDtos(messages) {
@@ -17,18 +24,34 @@ function buildPriorDtos(messages) {
     .map((m) => ({ role: m.role, content: m.content ?? "" }));
 }
 
+function mapDbMessageToUi(m) {
+  const uid = m.userBubbleClientId || `legacy-u-${m.id}`;
+  const aid = m.assistantBubbleClientId || `legacy-a-${m.id}`;
+  return [
+    {
+      id: uid,
+      role: "user",
+      content: m.userMessage ?? "",
+      responseTo: null,
+      editing: false,
+      streaming: false,
+    },
+    {
+      id: aid,
+      role: "assistant",
+      content: m.aiResponse ?? "",
+      responseTo: uid,
+      editing: false,
+      streaming: false,
+    },
+  ];
+}
+
 export default function ChatApp() {
   const { token, username, logout } = useAuth();
 
-  const [chats, setChats] = useState([
-    {
-      id: 1,
-      title: "New Chat",
-      messages: [],
-    },
-  ]);
-
-  const [activeChatId, setActiveChatId] = useState(1);
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(null);
 
   const [connected, setConnected] = useState(false);
   const [statusText, setStatusText] = useState("Connecting…");
@@ -53,6 +76,60 @@ export default function ChatApp() {
     chatsRef.current = chats;
   }, [chats]);
 
+  const loadSessions = useCallback(async () => {
+    if (!token) return;
+    try {
+      const rows = await fetchChatSessions(token);
+      const mapped = rows.map((s) => ({
+        id: s.id,
+        title: s.title || "New chat",
+        messages: [],
+        messagesLoaded: false,
+      }));
+      setChats(mapped);
+      // if (mapped.length === 0) {
+      //   setActiveChatId(null);
+      //   return;
+      // }
+      if (mapped.length === 0) {
+        const newSession = await createChatSession(token);
+
+        const newChat = {
+          id: newSession.id,
+          title: newSession.title || "New chat",
+          messages: [],
+          messagesLoaded: true,
+        };
+
+        setChats([newChat]);
+        setActiveChatId(newChat.id);
+        return;
+      }
+      const firstId = mapped[0].id;
+      setActiveChatId(firstId);
+      const firstRows = await fetchSessionMessages(token, firstId);
+      const messages = firstRows.flatMap(mapDbMessageToUi);
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === firstId ? { ...c, messages, messagesLoaded: true } : c
+        )
+      );
+    } catch (e) {
+      console.error(e);
+      setChats([]);
+      setActiveChatId(null);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      setChats([]);
+      setActiveChatId(null);
+      return;
+    }
+    loadSessions();
+  }, [token, loadSessions]);
+
   const setStreamingState = useCallback((value) => {
     isStreamingRef.current = value;
     setIsStreaming(value);
@@ -60,9 +137,30 @@ export default function ChatApp() {
 
   const activeChat = chats.find((c) => c.id === activeChatId);
   const userInitial = username?.charAt(0)?.toUpperCase() || "?";
-  // const firstName = username?.split(" ")[0] || "";
+
+  const selectChat = useCallback(
+    async (chatId) => {
+      setActiveChatId(chatId);
+      if (!token) return;
+      const snap = chatsRef.current.find((c) => c.id === chatId);
+      if (!snap || snap.messagesLoaded) return;
+      try {
+        const rows = await fetchSessionMessages(token, chatId);
+        const messages = rows.flatMap(mapDbMessageToUi);
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId ? { ...c, messages, messagesLoaded: true } : c
+          )
+        );
+      } catch (e) {
+        console.error(e);
+      }
+    },
+    [token]
+  );
 
   const finalizeStream = useCallback(() => {
+    const skipRefetch = stopRef.current;
     const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
     const assistantId = streamAssistantMessageIdRef.current;
 
@@ -87,7 +185,22 @@ export default function ChatApp() {
     stopRef.current = false;
     streamChatIdRef.current = null;
     setStreamingState(false);
-  }, [setStreamingState]);
+
+    if (!skipRefetch && token && targetChatId != null) {
+      fetchSessionMessages(token, targetChatId)
+        .then((rows) => {
+          const messages = rows.flatMap(mapDbMessageToUi);
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === targetChatId
+                ? { ...c, messages, messagesLoaded: true }
+                : c
+            )
+          );
+        })
+        .catch((e) => console.error(e));
+    }
+  }, [setStreamingState, token]);
 
   const appendAssistantChunk = useCallback((chunk) => {
     if (stopRef.current) return;
@@ -190,6 +303,9 @@ export default function ChatApp() {
     if (isStreamingRef.current || !connected) {
       return;
     }
+    if (activeChatIdRef.current == null) {
+      return;
+    }
 
     const clientStreamId = crypto.randomUUID();
     const userMessageId = crypto.randomUUID();
@@ -239,8 +355,10 @@ export default function ChatApp() {
 
     sendMessage({
       type: "NEW",
+      sessionId: chatId,
       clientStreamId,
       messageId: assistantMessageId,
+      userMessageId,
       content: text,
       priorMessages,
     });
@@ -254,6 +372,8 @@ export default function ChatApp() {
       if (!trimmed) return false;
 
       const chatId = activeChatIdRef.current;
+      if (chatId == null) return false;
+
       const chatSnapshot = chatsRef.current.find((c) => c.id === chatId);
       if (!chatSnapshot) return false;
 
@@ -302,6 +422,7 @@ export default function ChatApp() {
 
       sendMessage({
         type: "EDIT",
+        sessionId: chatId,
         clientStreamId,
         messageId: assistantMessageId,
         content: trimmed,
@@ -320,37 +441,60 @@ export default function ChatApp() {
     finalizeStream();
   }
 
-  function createNewChat() {
-    const newChat = {
-      id: Date.now(),
-      title: "New Chat",
-      messages: [],
-    };
-
-    setChats((prev) => [newChat, ...prev]);
-    setActiveChatId(newChat.id);
-  }
-
-  function deleteChat(chatId) {
-    setChats((prev) => prev.filter((c) => c.id !== chatId));
-
-    if (chatId === activeChatId) {
-      setActiveChatId(null);
+  async function createNewChat() {
+    if (!token || isStreamingRef.current) return;
+    try {
+      const s = await createChatSession(token);
+      const newChat = {
+        id: s.id,
+        title: s.title || "New chat",
+        messages: [],
+        messagesLoaded: true,
+      };
+      setChats((prev) => [newChat, ...prev]);
+      setActiveChatId(newChat.id);
+    } catch (e) {
+      console.error(e);
     }
   }
 
-  function renameChat(chatId) {
-    const newName = prompt("Enter new name");
-    if (!newName) return;
+  async function deleteChat(chatId) {
+    if (!token || isStreamingRef.current) return;
+    try {
+      await deleteChatSessionApi(token, chatId);
+    } catch (e) {
+      console.error(e);
+      return;
+    }
+    setChats((prev) => {
+      const next = prev.filter((c) => c.id !== chatId);
+      if (activeChatIdRef.current === chatId) {
+        setActiveChatId(next.length ? next[0].id : null);
+      }
+      return next;
+    });
+  }
 
-    setChats((prev) =>
-      prev.map((c) => (c.id === chatId ? { ...c, title: newName } : c))
-    );
+  async function renameChat(chatId) {
+    const newName = prompt("Enter new name");
+    if (!newName || !token) return;
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    try {
+      const updated = await updateChatSessionTitleApi(token, chatId, trimmed);
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId ? { ...c, title: updated.title ?? trimmed } : c
+        )
+      );
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   return (
     <div className="app-layout">
-      <div className="sidebar">
+      <div className={`sidebar ${isStreaming ? "sidebar-busy" : ""}`}>
         <button className="new-chat-btn" onClick={createNewChat}>
           + New Chat
         </button>
@@ -363,13 +507,34 @@ export default function ChatApp() {
                 chat.id === activeChatId ? "active" : ""
               }`}
             >
-              <span onClick={() => setActiveChatId(chat.id)}>{chat.title}</span>
+              <span onClick={() => selectChat(chat.id)}>{chat.title}</span>
 
-              <div className="chat-actions">
+              {/* <div className="chat-actions">
                 <button type="button" onClick={() => renameChat(chat.id)}>
                   ✏️
                 </button>
                 <button type="button" onClick={() => deleteChat(chat.id)}>
+                  🗑
+                </button>
+              </div> */}
+              <div className="chat-actions">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    renameChat(chat.id);
+                  }}
+                >
+                  ✏️
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteChat(chat.id);
+                  }}
+                >
                   🗑
                 </button>
               </div>
@@ -382,9 +547,6 @@ export default function ChatApp() {
             onClick={() => setShowProfileMenu((prev) => !prev)}
           >
             <div className="profile-circle">{userInitial}</div>
-            {/* <div className="profile-circle">{userInitial}</div>
-
-            <span className="profile-name">{firstName}</span> */}
 
             {showProfileMenu && (
               <div className="profile-dropdown">
@@ -407,41 +569,6 @@ export default function ChatApp() {
       <div className="chat-section">
         <header className="app-header">
           <h1 className="app-title">Talk To Me</h1>
-          {/* <div className="header-actions">
-            <span className="header-user" title={username || ""}>
-              {username ? `Signed in as ${username}` : ""}
-            </span>
-            <span
-              className={`status-badge ${connected ? "online" : "offline"}`}
-            >
-              {statusText}
-            </span>
-            {/* <button type="button" className="logout-btn" onClick={() => logout()}>
-              Log out
-            </button>*/}
-          {/* <button
-              type="button"
-              className="logout-btn"
-              onClick={() => {
-                const confirmed = window.confirm(
-                  "Are you sure you want to log out?"
-                );
-
-                if (confirmed) {
-                  logout();
-                }
-              }}
-            >
-              Log out
-            </button> */}
-          {/* <button
-              type="button"
-              className="logout-btn"
-              onClick={() => setShowLogoutModal(true)}
-            >
-              Log out
-            </button>
-          </div> */}
           <div className="header-actions">
             <span
               className={`status-badge ${connected ? "online" : "offline"}`}
@@ -491,7 +618,7 @@ export default function ChatApp() {
         <InputBox
           onSend={handleSend}
           onStop={stopResponse}
-          disabled={!connected}
+          disabled={!connected || !activeChat}
           isStreaming={isStreaming}
         />
       </div>
