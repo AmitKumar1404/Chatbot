@@ -34,8 +34,15 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
       if (onConnect) onConnect();
     },
 
+    // onDisconnect: () => {
+    //   console.warn('[WS] Disconnected');
+    // },
     onDisconnect: () => {
       console.warn('[WS] Disconnected');
+    
+      if (onError) {
+        onError();
+      }
     },
 
     onStompError: (frame) => {
@@ -48,11 +55,18 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
       if (onError) onError(error);
     },
 
-    onWebSocketClose: (event) => {
-      console.warn('[WS] WebSocket closed:', event);
-    },
-  });
-
+  //   onWebSocketClose: (event) => {
+  //     console.warn('[WS] WebSocket closed:', event);
+  //   },
+  // });
+  onWebSocketClose: (event) => {
+    console.warn('[WS] WebSocket closed:', event);
+  
+    if (onError) {
+      onError();
+    }
+  },
+});
   console.log('[WS] Activating STOMP client…');
   stompClient.activate();
 }

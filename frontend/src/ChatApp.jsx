@@ -105,15 +105,11 @@ export default function ChatApp() {
         setActiveChatId(newChat.id);
         return;
       }
-      const firstId = mapped[0].id;
-      setActiveChatId(firstId);
-      const firstRows = await fetchSessionMessages(token, firstId);
-      const messages = firstRows.flatMap(mapDbMessageToUi);
-      setChats((prev) =>
-        prev.map((c) =>
-          c.id === firstId ? { ...c, messages, messagesLoaded: true } : c
-        )
-      );
+
+      setChats(mapped);
+
+      // ✅ LOGIN ke baad NEW blank screen open hogi
+      setActiveChatId(null);
     } catch (e) {
       console.error(e);
       setChats([]);
@@ -292,7 +288,7 @@ export default function ChatApp() {
       },
       onError: () => {
         setConnected(false);
-        setStatusText("Disconnected — retrying…");
+        setStatusText("Disconnected");
       },
     });
 
@@ -303,10 +299,16 @@ export default function ChatApp() {
     if (isStreamingRef.current || !connected) {
       return;
     }
-    if (activeChatIdRef.current == null) {
+
+    const currentChatId = activeChatIdRef.current;
+
+    const currentChat = chatsRef.current.find((c) => c.id === currentChatId);
+
+    // ✅ Draft chat ko real DB chat me convert karo
+    if (!currentChatId || currentChat?.isDraft) {
+      createRealChatAndSend(text);
       return;
     }
-
     const clientStreamId = crypto.randomUUID();
     const userMessageId = crypto.randomUUID();
     const assistantMessageId = crypto.randomUUID();
@@ -441,23 +443,75 @@ export default function ChatApp() {
     finalizeStream();
   }
 
-  async function createNewChat() {
+  function createNewChat() {
+    if (isStreamingRef.current) return;
+
+    // ✅ already blank chat open hai
+    const existingBlankChat = chatsRef.current.find(
+      (c) => c.isDraft && c.messages.length === 0
+    );
+
+    if (existingBlankChat) {
+      setActiveChatId(existingBlankChat.id);
+      activeChatIdRef.current = existingBlankChat.id;
+      return;
+    }
+
+    // ✅ frontend-only temporary blank chat
+    const tempId = `draft-${Date.now()}`;
+
+    const draftChat = {
+      id: tempId,
+      title: "New chat",
+      messages: [],
+      messagesLoaded: true,
+      isDraft: true,
+    };
+
+    setChats((prev) => [draftChat, ...prev]);
+
+    setActiveChatId(tempId);
+
+    activeChatIdRef.current = tempId;
+  }
+  async function createRealChatAndSend(text) {
     if (!token || isStreamingRef.current) return;
+
     try {
+      // current draft id
+      const oldDraftId = activeChatIdRef.current;
+
+      // backend me REAL session create
       const s = await createChatSession(token);
-      const newChat = {
+
+      const realChat = {
         id: s.id,
         title: s.title || "New chat",
         messages: [],
         messagesLoaded: true,
       };
-      setChats((prev) => [newChat, ...prev]);
-      setActiveChatId(newChat.id);
+
+      // draft remove + real chat add
+      setChats((prev) => {
+        const withoutDraft = prev.filter((c) => c.id !== oldDraftId);
+
+        return [realChat, ...withoutDraft];
+      });
+
+      // active chat update
+      setActiveChatId(realChat.id);
+
+      // IMPORTANT
+      activeChatIdRef.current = realChat.id;
+
+      // actual message send
+      setTimeout(() => {
+        handleSend(text);
+      }, 0);
     } catch (e) {
       console.error(e);
     }
   }
-
   async function deleteChat(chatId) {
     if (!token || isStreamingRef.current) return;
     try {
@@ -509,14 +563,6 @@ export default function ChatApp() {
             >
               <span onClick={() => selectChat(chat.id)}>{chat.title}</span>
 
-              {/* <div className="chat-actions">
-                <button type="button" onClick={() => renameChat(chat.id)}>
-                  ✏️
-                </button>
-                <button type="button" onClick={() => deleteChat(chat.id)}>
-                  🗑
-                </button>
-              </div> */}
               <div className="chat-actions">
                 <button
                   type="button"
@@ -547,6 +593,8 @@ export default function ChatApp() {
             onClick={() => setShowProfileMenu((prev) => !prev)}
           >
             <div className="profile-circle">{userInitial}</div>
+
+            <div className="profile-name">{username?.split(" ")[0]}</div>
 
             {showProfileMenu && (
               <div className="profile-dropdown">
@@ -618,7 +666,8 @@ export default function ChatApp() {
         <InputBox
           onSend={handleSend}
           onStop={stopResponse}
-          disabled={!connected || !activeChat}
+          // disabled={!connected || !activeChat}
+          disabled={!connected}
           isStreaming={isStreaming}
         />
       </div>
