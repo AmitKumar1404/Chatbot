@@ -28,6 +28,29 @@ public interface ChatService {
     ChatSession resolveStreamingSessionForUser(String username, Long sessionId, String firstUserLineForTitle);
 
     /**
+     * Creates or resets the DB row for an in-flight stream ({@code generationComplete=false}).
+     */
+    void beginStreamingTurn(
+            String username,
+            ChatStompPayload.Type type,
+            Long sessionId,
+            String userContent,
+            String userMessageClientId,
+            String assistantMessageClientId,
+            String editTargetUserClientId
+    );
+
+    /**
+     * Persists accumulated assistant text while the model is still streaming.
+     */
+    void updatePartialAiResponse(
+            String username,
+            Long sessionId,
+            String assistantMessageClientId,
+            String partialAssistantText
+    );
+
+    /**
      * Persists a completed (or cancelled) streamed turn. Runs in a transaction suitable for reactive callbacks.
      */
     void persistWebsocketTurn(

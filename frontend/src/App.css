@@ -59,9 +59,63 @@ body {
   color: #fff;
 }
 
+/* .status-badge.offline {
+  background: #dc2626;
+  color: #fff;
+} */
+/* .status-badge.offline {
+  background: #dc2626;
+  color: #fff;
+
+  animation: disconnectedBlink 1s infinite;
+}
+@keyframes disconnectedBlink {
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+
+  100% {
+    opacity: 1;
+  }
+} */
 .status-badge.offline {
   background: #dc2626;
   color: #fff;
+
+  animation: disconnectedPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes disconnectedPulse {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.55;
+    transform: scale(1.05);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.network-offline-banner {
+  margin: 0 16px 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
 }
 
 /* ===== Chat window ===== */
@@ -1170,8 +1224,17 @@ body {
   position: relative;
 }
 
+/* .profile-wrapper {
+  position: relative;
+} */
 .profile-wrapper {
   position: relative;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  cursor: pointer;
 }
 
 .profile-circle {
@@ -1199,14 +1262,10 @@ body {
     transform 0.18s ease,
     opacity 0.18s ease;
 }
-/* .profile-wrapper {
-  position: relative;
 
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.profile-circle:hover {
+  transform: scale(1.05);
 }
-
 .profile-name {
   color: #f3f4f6;
 
@@ -1218,9 +1277,8 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-} */
-.profile-circle:hover {
-  transform: scale(1.05);
+
+  text-transform: uppercase;
 }
 
 .profile-dropdown {
