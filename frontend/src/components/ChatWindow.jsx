@@ -20,10 +20,6 @@ const UserBubble = memo(function UserBubble({
           {/* MESSAGE TEXT */}
           <p className="bubble-text">{msg.content}</p>
 
-          {/* =========================
-              ACTION ROW (EDIT + COPY)
-              FIX: horizontal under message
-          ========================= */}
           <div className="msg-actions-row">
             {/* ✏️ EDIT BUTTON */}
             <button

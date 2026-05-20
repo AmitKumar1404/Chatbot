@@ -1,14 +1,17 @@
 package com.chatbot.controller;
 
 import com.chatbot.constant.ResponseCode;
+import com.chatbot.dto.ActiveStreamStatusDto;
 import com.chatbot.dto.ChatRequest;
 import com.chatbot.dto.ChatResponse;
 import com.chatbot.dto.UpdateSessionTitleRequest;
 import com.chatbot.model.ChatSession;
 import com.chatbot.model.Message;
+import com.chatbot.service.ActiveStreamRegistry;
 import com.chatbot.service.ChatService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -27,9 +30,11 @@ import static com.chatbot.constant.AppConstants.CHAT_BASE_PATH;
 public class ChatController {
 
     private final ChatService chatService;
+    private final ActiveStreamRegistry activeStreamRegistry;
 
-    public ChatController(ChatService chatService) {
+    public ChatController(ChatService chatService, ActiveStreamRegistry activeStreamRegistry) {
         this.chatService = chatService;
+        this.activeStreamRegistry = activeStreamRegistry;
     }
 
     @PostMapping
@@ -63,5 +68,22 @@ public class ChatController {
     @GetMapping("/sessions/{sessionId}/messages")
     public ResponseEntity<List<Message>> messages(@PathVariable Long sessionId) {
         return ResponseEntity.status(ResponseCode.OK).body(chatService.getMessages(sessionId));
+    }
+
+    /**
+     * Returns the authenticated user's in-flight stream metadata (empty body when idle).
+     */
+    @GetMapping("/stream/active")
+    public ResponseEntity<ActiveStreamStatusDto> activeStream(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(ResponseCode.UNAUTHORIZED).build();
+        }
+        return activeStreamRegistry.getActiveStreamStatus(authentication.getName())
+                .map(status -> ResponseEntity.ok(new ActiveStreamStatusDto(
+                        status.clientStreamId(),
+                        status.sessionId(),
+                        status.assistantMessageClientId()
+                )))
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 }

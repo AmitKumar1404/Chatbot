@@ -12,6 +12,8 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
     Optional<Message> findByChatSession_IdAndUserBubbleClientId(Long sessionId, String userBubbleClientId);
 
+    Optional<Message> findByChatSession_IdAndAssistantBubbleClientId(Long sessionId, String assistantBubbleClientId);
+
     Optional<Message> findByIdAndChatSession_Id(Long id, Long sessionId);
 
     void deleteByChatSession_IdAndIdGreaterThan(Long sessionId, Long messageId);

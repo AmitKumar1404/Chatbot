@@ -16,6 +16,7 @@ import java.time.Duration;
 
 // ADDED: shared constants
 import static com.chatbot.constant.StreamConstants.ERROR_PREFIX;
+import static com.chatbot.constant.StreamConstants.isTransientStreamingFailure;
 import java.util.Map;
 
 @Service
@@ -89,7 +90,11 @@ public class OllamaStreamingServiceImpl implements OllamaStreamingService {
                 .timeout(Duration.ofSeconds(90))
                 .doOnComplete(() -> log.info("Ollama streaming complete for model='{}'", model))
                 .doOnError(e -> log.error("Ollama streaming error: {}", e.getMessage(), e))
-                .onErrorResume(e -> Flux.just(ERROR_PREFIX + "Streaming failed. Please try again."))
+                // Do not emit ERROR_PREFIX as a "chunk" for transient failures — that bypasses
+                // ChatWebSocketController.doOnError and gets persisted via doOnComplete.
+                .onErrorResume(e -> isTransientStreamingFailure(e)
+                        ? Flux.error(e)
+                        : Flux.just(ERROR_PREFIX + "Streaming failed. Please try again."))
                 .doFinally(sig -> {
                     if (sig == SignalType.CANCEL) {
                         log.info("Reactor cancellation propagated — model='{}'", model);

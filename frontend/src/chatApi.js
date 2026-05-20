@@ -32,6 +32,16 @@ export async function fetchSessionMessages(token, sessionId) {
   return res.json();
 }
 
+/** Returns active stream metadata, or null when no stream is in flight. */
+export async function fetchActiveStream(token) {
+  const res = await fetch(`${API_BASE_URL}/chat/stream/active`, {
+    headers: authHeaders(token),
+  });
+  if (res.status === 204 || res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to load active stream status");
+  return res.json();
+}
+
 export async function deleteChatSessionApi(token, sessionId) {
   const res = await fetch(`${API_BASE_URL}/chat/sessions/${sessionId}`, {
     method: "DELETE",

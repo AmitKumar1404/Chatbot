@@ -1,6 +1,5 @@
 package com.chatbot.config;
 
-import com.chatbot.service.ActiveStreamRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
@@ -15,12 +14,6 @@ public class WebSocketSessionCleanupListener {
 
     private static final Logger log = LoggerFactory.getLogger(WebSocketSessionCleanupListener.class);
 
-    private final ActiveStreamRegistry activeStreamRegistry;
-
-    public WebSocketSessionCleanupListener(ActiveStreamRegistry activeStreamRegistry) {
-        this.activeStreamRegistry = activeStreamRegistry;
-    }
-
     @EventListener
     public void onSessionDisconnect(SessionDisconnectEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
@@ -29,11 +22,8 @@ public class WebSocketSessionCleanupListener {
             return;
         }
 
-        // UPDATED — cancel now returns Optional clientStreamId
-        boolean cancelled = activeStreamRegistry.cancel(principal.getName(), "WebSocket session disconnected").isPresent();
-        if (cancelled) {
-            log.info("Cleanup completed after disconnect — principal={}, sessionId={}",
-                    principal.getName(), accessor.getSessionId());
-        }
+        // Transient disconnect must not cancel in-flight generation — client recovers via REST + WS resume.
+        log.info("WebSocket session disconnected — generation continues — principal={}, stompSessionId={}",
+                principal.getName(), accessor.getSessionId());
     }
 }
