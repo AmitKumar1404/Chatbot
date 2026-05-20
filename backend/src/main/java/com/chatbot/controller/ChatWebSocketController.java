@@ -18,14 +18,17 @@ import reactor.core.publisher.SignalType;
 import java.security.Principal;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.chatbot.constant.StreamConstants.ERROR_PREFIX;
+import static com.chatbot.constant.StreamConstants.isTransientStreamingFailure;
 
 @Controller
 public class ChatWebSocketController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatWebSocketController.class);
     private static final String USER_QUEUE = "/queue/messages";
+    private static final long PARTIAL_PERSIST_INTERVAL_MS = 400;
 
     private final OllamaStreamingService streamingService;
     private final SimpMessagingTemplate messagingTemplate;
@@ -71,6 +74,12 @@ public class ChatWebSocketController {
         }
 
         final String outboundClientStreamId = clientStreamId;
+
+        if (activeStreamRegistry.isDuplicateClientStream(userName, outboundClientStreamId)) {
+            log.info("Ignoring duplicate /app/chat — stream already active principal={} clientStreamId={}",
+                    userName, outboundClientStreamId);
+            return;
+        }
 
         String latestUser = payload.getContent();
         if (latestUser == null || latestUser.isBlank()) {
@@ -127,8 +136,26 @@ public class ChatWebSocketController {
                 persistedSessionId,
                 composedPrompt.length());
 
+        try {
+            chatService.beginStreamingTurn(
+                    userName,
+                    payload.getType(),
+                    persistedSessionId,
+                    latestUser,
+                    payload.getType() == ChatStompPayload.Type.NEW ? payload.getUserMessageId() : null,
+                    assistantBubbleId,
+                    payload.getType() == ChatStompPayload.Type.EDIT ? payload.getEditTargetMessageId() : null
+            );
+        } catch (RuntimeException ex) {
+            log.warn("beginStreamingTurn failed principal={}, sessionId={}: {}", userName, persistedSessionId, ex.getMessage());
+            sendJsonToUser(userName, StreamDownstreamEvent.error(outboundClientStreamId, assistantBubbleId, ERROR_PREFIX + ex.getMessage()));
+            sendJsonToUser(userName, StreamDownstreamEvent.done(outboundClientStreamId, assistantBubbleId));
+            return;
+        }
+
         StringBuilder assistantAccumulator = new StringBuilder();
         AtomicBoolean persisted = new AtomicBoolean(false);
+        AtomicLong lastPartialPersistMs = new AtomicLong(0);
 
         Runnable persistOnce = () -> {
             if (!persisted.compareAndSet(false, true)) {
@@ -153,7 +180,13 @@ public class ChatWebSocketController {
         // Subscribe inside replaceAndStart so the Disposable is registered in the same
         // atomic step as cancelling any prior stream — avoids Disposable.Swap races
         // where STOP disposed before swap.update(...) and left Ollama running.
-        activeStreamRegistry.replaceAndStart(userName, streamId, outboundClientStreamId, () ->
+        activeStreamRegistry.replaceAndStart(
+                userName,
+                streamId,
+                outboundClientStreamId,
+                persistedSessionId,
+                assistantBubbleId,
+                () ->
                 streamingService.streamChat(composedPrompt)
                         .doOnNext(chunk -> {
                             log.debug("Sending chunk to principal={} clientStreamId={} chunk='{}'",
@@ -164,6 +197,20 @@ public class ChatWebSocketController {
                             } else if (chunk != null) {
                                 assistantAccumulator.append(chunk);
                                 sendJsonToUser(userName, StreamDownstreamEvent.chunk(outboundClientStreamId, assistantBubbleId, chunk));
+                                long now = System.currentTimeMillis();
+                                if (now - lastPartialPersistMs.get() >= PARTIAL_PERSIST_INTERVAL_MS) {
+                                    lastPartialPersistMs.set(now);
+                                    try {
+                                        chatService.updatePartialAiResponse(
+                                                userName,
+                                                persistedSessionId,
+                                                assistantBubbleId,
+                                                assistantAccumulator.toString()
+                                        );
+                                    } catch (RuntimeException ex) {
+                                        log.debug("Partial persist skipped principal={}: {}", userName, ex.getMessage());
+                                    }
+                                }
                             }
                         })
                         .doOnComplete(() -> {
@@ -172,28 +219,105 @@ public class ChatWebSocketController {
                             log.info("Streaming complete — sent DONE envelope principal={} clientStreamId={}",
                                     userName, outboundClientStreamId);
                         })
+//                        .doOnError(e -> {
+//                            log.error("Streaming error — principal={}, clientStreamId={}, error={}",
+//                                    userName, outboundClientStreamId, e.getMessage(), e);
+//                            assistantAccumulator.append(ERROR_PREFIX).append(e.getMessage());
+//                            persistOnce.run();
+//                            sendJsonToUser(userName, StreamDownstreamEvent.error(outboundClientStreamId, assistantBubbleId,
+//                                    ERROR_PREFIX + e.getMessage()), persistedSessionId);
+//                            sendJsonToUser(userName, StreamDownstreamEvent.done(outboundClientStreamId, assistantBubbleId), persistedSessionId);
+//                        })
                         .doOnError(e -> {
-                            log.error("Streaming error — principal={}, clientStreamId={}, error={}",
-                                    userName, outboundClientStreamId, e.getMessage(), e);
-                            assistantAccumulator.append(ERROR_PREFIX).append(e.getMessage());
+                            if (isTransientStreamingFailure(e)) {
+                                log.info(
+                                        "Transient disconnect detected. Keeping stream recoverable. principal={}, clientStreamId={}",
+                                        userName,
+                                        outboundClientStreamId
+                                );
+                                // NO error event, NO done event, NO persistOnce — partial DB state remains.
+                                return;
+                            }
+
+                            log.error(
+                                    "Streaming error — principal={}, clientStreamId={}, error={}",
+                                    userName,
+                                    outboundClientStreamId,
+                                    e.getMessage(),
+                                    e
+                            );
+
+                            assistantAccumulator.append(ERROR_PREFIX)
+                                    .append(e.getMessage());
+
                             persistOnce.run();
-                            sendJsonToUser(userName, StreamDownstreamEvent.error(outboundClientStreamId, assistantBubbleId,
-                                    ERROR_PREFIX + e.getMessage()), persistedSessionId);
-                            sendJsonToUser(userName, StreamDownstreamEvent.done(outboundClientStreamId, assistantBubbleId), persistedSessionId);
+
+                            sendJsonToUser(
+                                    userName,
+                                    StreamDownstreamEvent.error(
+                                            outboundClientStreamId,
+                                            assistantBubbleId,
+                                            ERROR_PREFIX + e.getMessage()
+                                    ),
+                                    persistedSessionId
+                            );
+
+                            sendJsonToUser(
+                                    userName,
+                                    StreamDownstreamEvent.done(
+                                            outboundClientStreamId,
+                                            assistantBubbleId
+                                    ),
+                                    persistedSessionId
+                            );
                         })
+
                         .doOnCancel(() -> log.info("Streaming cancelled by reactor — principal={}, streamId={}, clientStreamId={}",
                                 userName, streamId, outboundClientStreamId))
+//                        .doFinally(signalType -> {
+//                            if (signalType == SignalType.CANCEL) {
+//                                persistOnce.run();
+//                            }
+//                            boolean cleaned = activeStreamRegistry.removeIfMatches(userName, streamId);
+//                            if (cleaned) {
+//                                log.info("Cleanup completed — principal={}, streamId={}, clientStreamId={}, signal={}",
+//                                        userName, streamId, outboundClientStreamId, signalType);
+//                            } else {
+//                                log.debug("Cleanup skipped (stream already replaced/removed) — principal={}, streamId={}, signal={}",
+//                                        userName, streamId, signalType);
+//                            }
+//                        })
                         .doFinally(signalType -> {
-                            if (signalType == SignalType.CANCEL) {
+
+                            boolean userStopped =
+                                    signalType == SignalType.CANCEL &&
+                                            !activeStreamRegistry.hasActiveStream(userName);
+
+                            if (userStopped) {
                                 persistOnce.run();
                             }
-                            boolean cleaned = activeStreamRegistry.removeIfMatches(userName, streamId);
+
+                            boolean cleaned =
+                                    activeStreamRegistry.removeIfMatches(userName, streamId);
+
                             if (cleaned) {
-                                log.info("Cleanup completed — principal={}, streamId={}, clientStreamId={}, signal={}",
-                                        userName, streamId, outboundClientStreamId, signalType);
+
+                                log.info(
+                                        "Cleanup completed — principal={}, streamId={}, clientStreamId={}, signal={}",
+                                        userName,
+                                        streamId,
+                                        outboundClientStreamId,
+                                        signalType
+                                );
+
                             } else {
-                                log.debug("Cleanup skipped (stream already replaced/removed) — principal={}, streamId={}, signal={}",
-                                        userName, streamId, signalType);
+
+                                log.debug(
+                                        "Cleanup skipped (stream already replaced/removed) — principal={}, streamId={}, signal={}",
+                                        userName,
+                                        streamId,
+                                        signalType
+                                );
                             }
                         })
                         .subscribe());

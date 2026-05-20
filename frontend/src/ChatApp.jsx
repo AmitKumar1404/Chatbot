@@ -12,10 +12,12 @@ import {
   fetchChatSessions,
   createChatSession,
   fetchSessionMessages,
+  fetchActiveStream,
   deleteChatSessionApi,
   updateChatSessionTitleApi,
 } from "./chatApi";
 import "./App.css";
+import { useNetworkStatus } from "./hooks/useNetworkStatus";
 
 function buildPriorDtos(messages) {
   return messages
@@ -27,6 +29,7 @@ function buildPriorDtos(messages) {
 function mapDbMessageToUi(m) {
   const uid = m.userBubbleClientId || `legacy-u-${m.id}`;
   const aid = m.assistantBubbleClientId || `legacy-a-${m.id}`;
+  const assistantStreaming = m.generationComplete === false;
   return [
     {
       id: uid,
@@ -42,9 +45,24 @@ function mapDbMessageToUi(m) {
       content: m.aiResponse ?? "",
       responseTo: uid,
       editing: false,
-      streaming: false,
+      streaming: assistantStreaming,
     },
   ];
+}
+
+function mergeDbMessagesWithActiveStream(localMessages, dbRows, assistantId) {
+  const dbUi = dbRows.flatMap(mapDbMessageToUi);
+  if (!assistantId) return dbUi;
+
+  return dbUi.map((m) => {
+    if (m.id !== assistantId || m.role !== "assistant") return m;
+    const local = localMessages.find((x) => x.id === assistantId);
+    const localContent = local?.content ?? "";
+    const dbContent = m.content ?? "";
+    const merged =
+      dbContent.length >= localContent.length ? dbContent : localContent;
+    return { ...m, content: merged, streaming: true };
+  });
 }
 
 export default function ChatApp() {
@@ -55,18 +73,27 @@ export default function ChatApp() {
 
   const [connected, setConnected] = useState(false);
   const [statusText, setStatusText] = useState("Connecting…");
+  const { isOnline: isBrowserOnline, isOffline: isBrowserOffline } =
+    useNetworkStatus();
 
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const stopRef = useRef(false);
+  const recoveryPollRef = useRef(null);
+  const recoveryInFlightRef = useRef(false);
   const isStreamingRef = useRef(false);
   const activeChatIdRef = useRef(activeChatId);
   const chatsRef = useRef(chats);
   const streamChatIdRef = useRef(null);
   const activeClientStreamIdRef = useRef(null);
   const streamAssistantMessageIdRef = useRef(null);
+  const streamTypeRef = useRef("NEW");
+  const streamUserMessageIdRef = useRef(null);
+  const streamEditTargetRef = useRef(null);
+  const resumeAttemptedForStreamIdRef = useRef(null);
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -131,6 +158,15 @@ export default function ChatApp() {
     setIsStreaming(value);
   }, []);
 
+  const clearRecoveryPoll = useCallback(() => {
+    if (recoveryPollRef.current != null) {
+      clearInterval(recoveryPollRef.current);
+      recoveryPollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearRecoveryPoll(), [clearRecoveryPoll]);
+
   const activeChat = chats.find((c) => c.id === activeChatId);
   const userInitial = username?.charAt(0)?.toUpperCase() || "?";
 
@@ -156,6 +192,8 @@ export default function ChatApp() {
   );
 
   const finalizeStream = useCallback(() => {
+    clearRecoveryPoll();
+    setIsRecovering(false);
     const skipRefetch = stopRef.current;
     const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
     const assistantId = streamAssistantMessageIdRef.current;
@@ -178,6 +216,10 @@ export default function ChatApp() {
 
     activeClientStreamIdRef.current = null;
     streamAssistantMessageIdRef.current = null;
+    streamTypeRef.current = "NEW";
+    streamUserMessageIdRef.current = null;
+    streamEditTargetRef.current = null;
+    resumeAttemptedForStreamIdRef.current = null;
     stopRef.current = false;
     streamChatIdRef.current = null;
     setStreamingState(false);
@@ -196,7 +238,180 @@ export default function ChatApp() {
         })
         .catch((e) => console.error(e));
     }
-  }, [setStreamingState, token]);
+  }, [clearRecoveryPoll, setStreamingState, token]);
+
+  const syncMessagesFromServer = useCallback(
+    async (chatId, assistantId) => {
+      const rows = await fetchSessionMessages(token, chatId);
+      const chat = chatsRef.current.find((c) => c.id === chatId);
+      const localMessages = chat?.messages ?? [];
+      const messages = mergeDbMessagesWithActiveStream(
+        localMessages,
+        rows,
+        assistantId
+      );
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId ? { ...c, messages, messagesLoaded: true } : c
+        )
+      );
+      const row = rows.find((r) => r.assistantBubbleClientId === assistantId);
+      return row == null || row.generationComplete !== false;
+    },
+    [token]
+  );
+
+  const buildStreamResumePayload = useCallback(
+    (chatId, assistantId, clientStreamId) => {
+      const chat = chatsRef.current.find((c) => c.id === chatId);
+      const msgs = chat?.messages ?? [];
+      const assistant = msgs.find(
+        (m) => m.id === assistantId && m.role === "assistant"
+      );
+      if (!assistant?.responseTo) return null;
+
+      const user = msgs.find(
+        (m) => m.id === assistant.responseTo && m.role === "user"
+      );
+      if (!user) return null;
+
+      const userIdx = msgs.findIndex((m) => m.id === user.id);
+      const priorMessages = buildPriorDtos(msgs.slice(0, userIdx));
+      const type = streamTypeRef.current ?? "NEW";
+      const payload = {
+        type,
+        sessionId: chatId,
+        clientStreamId,
+        messageId: assistantId,
+        content: user.content ?? "",
+        priorMessages,
+      };
+
+      if (type === "EDIT") {
+        payload.editTargetMessageId =
+          streamEditTargetRef.current ?? user.id;
+      } else {
+        payload.userMessageId = streamUserMessageIdRef.current ?? user.id;
+      }
+
+      return payload;
+    },
+    []
+  );
+
+  const restartInterruptedGeneration = useCallback(
+    (chatId, assistantId, clientStreamId) => {
+      if (stopRef.current || !isStreamingRef.current) return false;
+      if (resumeAttemptedForStreamIdRef.current === clientStreamId) {
+        return false;
+      }
+
+      const payload = buildStreamResumePayload(
+        chatId,
+        assistantId,
+        clientStreamId
+      );
+      if (!payload?.content?.trim()) return false;
+
+      resumeAttemptedForStreamIdRef.current = clientStreamId;
+
+      // Regenerate from scratch on the server; clear local bubble to avoid duplicated text.
+      setChats((prev) =>
+        prev.map((chat) => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map((m) =>
+              m.id === assistantId && m.role === "assistant"
+                ? { ...m, content: "", streaming: true }
+                : m
+            ),
+          };
+        })
+      );
+
+      sendMessage(payload);
+      return true;
+    },
+    [buildStreamResumePayload]
+  );
+
+  const recoverInterruptedStream = useCallback(async () => {
+    if (!token || !isStreamingRef.current || stopRef.current) return;
+    if (recoveryInFlightRef.current) return;
+    recoveryInFlightRef.current = true;
+
+    setIsRecovering(true);
+    setStatusText("Resuming…");
+
+    try {
+      let assistantId = streamAssistantMessageIdRef.current;
+      let clientStreamId = activeClientStreamIdRef.current;
+
+      const active = await fetchActiveStream(token);
+      if (active) {
+        clientStreamId = active.clientStreamId;
+        assistantId = active.assistantMessageId;
+        activeClientStreamIdRef.current = clientStreamId;
+        streamAssistantMessageIdRef.current = assistantId;
+        if (active.sessionId != null) {
+          streamChatIdRef.current = active.sessionId;
+        }
+      }
+
+      const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
+      if (targetChatId == null || !assistantId || !clientStreamId) return;
+
+      const alreadyComplete = await syncMessagesFromServer(
+        targetChatId,
+        assistantId
+      );
+      if (alreadyComplete) {
+        finalizeStream();
+        return;
+      }
+
+      // Backend restart kills the in-memory Ollama subscription and ActiveStreamRegistry.
+      // Polling DB alone cannot resume tokens — re-dispatch /app/chat on the new JVM.
+      if (!active) {
+        restartInterruptedGeneration(targetChatId, assistantId, clientStreamId);
+      }
+
+      clearRecoveryPoll();
+      recoveryPollRef.current = setInterval(async () => {
+        if (!isStreamingRef.current || stopRef.current) {
+          clearRecoveryPoll();
+          return;
+        }
+        try {
+          const tid = streamChatIdRef.current ?? activeChatIdRef.current;
+          const aid = streamAssistantMessageIdRef.current;
+          if (tid == null || !aid) return;
+          const complete = await syncMessagesFromServer(tid, aid);
+          if (complete) {
+            clearRecoveryPoll();
+            finalizeStream();
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 1500);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      recoveryInFlightRef.current = false;
+      if (isStreamingRef.current) {
+        setIsRecovering(false);
+        setStatusText("Connected");
+      }
+    }
+  }, [
+    clearRecoveryPoll,
+    finalizeStream,
+    restartInterruptedGeneration,
+    syncMessagesFromServer,
+    token,
+  ]);
 
   const appendAssistantChunk = useCallback((chunk) => {
     if (stopRef.current) return;
@@ -255,6 +470,7 @@ export default function ChatApp() {
 
       switch (event.type) {
         case "chunk":
+          setIsRecovering(false);
           appendAssistantChunk(event.chunk ?? "");
           break;
         case "error":
@@ -284,19 +500,37 @@ export default function ChatApp() {
       onMessage: handleStreamBody,
       onConnect: () => {
         setConnected(true);
-        setStatusText("Connected");
+        if (isStreamingRef.current && activeClientStreamIdRef.current) {
+          recoverInterruptedStream();
+        } else {
+          setStatusText("Connected");
+        }
       },
       onError: () => {
         setConnected(false);
-        setStatusText("Disconnected");
+        if (isStreamingRef.current) {
+          setStatusText("Reconnecting…");
+        } else {
+          setStatusText("Disconnected");
+        }
       },
     });
 
     return () => disconnectWebSocket();
-  }, [handleStreamBody, token]);
+  }, [handleStreamBody, recoverInterruptedStream, token]);
+
+  const displayStatusText = !token
+    ? "Not signed in"
+    : isRecovering
+      ? "Resuming…"
+      : isBrowserOffline
+        ? "No internet"
+        : connected
+          ? "Connected"
+          : statusText;
 
   function handleSend(text) {
-    if (isStreamingRef.current || !connected) {
+    if (isStreamingRef.current || !connected || isBrowserOffline) {
       return;
     }
 
@@ -321,6 +555,10 @@ export default function ChatApp() {
     streamChatIdRef.current = chatId;
     activeClientStreamIdRef.current = clientStreamId;
     streamAssistantMessageIdRef.current = assistantMessageId;
+    streamTypeRef.current = "NEW";
+    streamUserMessageIdRef.current = userMessageId;
+    streamEditTargetRef.current = null;
+    resumeAttemptedForStreamIdRef.current = null;
     setStreamingState(true);
 
     setChats((prev) =>
@@ -368,7 +606,7 @@ export default function ChatApp() {
 
   const handleEditSave = useCallback(
     (userMessageId, newText) => {
-      if (isStreamingRef.current || !connected) return false;
+      if (isStreamingRef.current || !connected || isBrowserOffline) return false;
 
       const trimmed = (newText ?? "").trim();
       if (!trimmed) return false;
@@ -402,6 +640,10 @@ export default function ChatApp() {
       streamChatIdRef.current = chatId;
       activeClientStreamIdRef.current = clientStreamId;
       streamAssistantMessageIdRef.current = assistantMessageId;
+      streamTypeRef.current = "EDIT";
+      streamUserMessageIdRef.current = userMessageId;
+      streamEditTargetRef.current = userMessageId;
+      resumeAttemptedForStreamIdRef.current = null;
       setStreamingState(true);
 
       setChats((prev) =>
@@ -433,7 +675,7 @@ export default function ChatApp() {
       });
       return true;
     },
-    [connected, setStreamingState]
+    [connected, isBrowserOffline, setStreamingState]
   );
 
   function stopResponse() {
@@ -619,9 +861,18 @@ export default function ChatApp() {
           <h1 className="app-title">Talk To Me</h1>
           <div className="header-actions">
             <span
-              className={`status-badge ${connected ? "online" : "offline"}`}
+              className={`status-badge ${
+                connected && isBrowserOnline ? "online" : "offline"
+              }`}
+              title={
+                isBrowserOffline
+                  ? "No internet connection detected"
+                  : connected
+                    ? "WebSocket connected"
+                    : "WebSocket disconnected"
+              }
             >
-              {statusText}
+              {displayStatusText}
             </span>
           </div>
         </header>
@@ -657,6 +908,26 @@ export default function ChatApp() {
             </div>
           </div>
         )}
+        {isBrowserOffline && (
+          <div
+            className="network-offline-banner"
+            role="status"
+            aria-live="polite"
+          >
+            You are offline. Messages cannot be sent until your connection is
+            restored.
+          </div>
+        )}
+        {isRecovering && !isBrowserOffline && (
+          <div
+            className="network-offline-banner stream-recovery-banner"
+            role="status"
+            aria-live="polite"
+          >
+            Connection restored — resuming your response…
+          </div>
+        )}
+
         <ChatWindow
           messages={activeChat?.messages || []}
           isStreaming={isStreaming}
@@ -666,8 +937,7 @@ export default function ChatApp() {
         <InputBox
           onSend={handleSend}
           onStop={stopResponse}
-          // disabled={!connected || !activeChat}
-          disabled={!connected}
+          disabled={!connected || isBrowserOffline}
           isStreaming={isStreaming}
         />
       </div>

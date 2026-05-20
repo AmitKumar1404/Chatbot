@@ -139,6 +139,84 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
+    public void beginStreamingTurn(
+            String username,
+            ChatStompPayload.Type type,
+            Long sessionId,
+            String userContent,
+            String userMessageClientId,
+            String assistantMessageClientId,
+            String editTargetUserClientId) {
+        transactionTemplate.executeWithoutResult(status -> {
+            User user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException(USER_NOT_FOUND));
+            ChatSession session = chatSessionRepository.findByIdAndUser_Id(sessionId, user.getId())
+                    .orElseThrow(() -> new RuntimeException(SESSION_NOT_FOUND));
+
+            if (type == ChatStompPayload.Type.EDIT) {
+                Message target = findEditTarget(session.getId(), editTargetUserClientId)
+                        .orElseThrow(() -> new RuntimeException("Edited message not found"));
+                target.setUserMessage(userContent);
+                target.setAiResponse("");
+                target.setAssistantBubbleClientId(assistantMessageClientId);
+                target.setGenerationComplete(false);
+                target.setTimestamp(Instant.now());
+                messageRepository.save(target);
+                messageRepository.deleteByChatSession_IdAndIdGreaterThan(session.getId(), target.getId());
+            } else {
+                messageRepository
+                        .findByChatSession_IdAndAssistantBubbleClientId(session.getId(), assistantMessageClientId)
+                        .ifPresentOrElse(existing -> {
+                            existing.setUserMessage(userContent);
+                            existing.setAiResponse("");
+                            existing.setUserBubbleClientId(userMessageClientId);
+                            existing.setGenerationComplete(false);
+                            existing.setTimestamp(Instant.now());
+                            messageRepository.save(existing);
+                        }, () -> {
+                            Message message = Message.builder()
+                                    .chatSession(session)
+                                    .userMessage(userContent)
+                                    .aiResponse("")
+                                    .timestamp(Instant.now())
+                                    .userBubbleClientId(userMessageClientId)
+                                    .assistantBubbleClientId(assistantMessageClientId)
+                                    .generationComplete(false)
+                                    .build();
+                            messageRepository.save(message);
+                        });
+            }
+
+            maybeRefreshSessionTitle(session, userContent);
+            chatSessionRepository.save(session);
+        });
+    }
+
+    @Override
+    public void updatePartialAiResponse(
+            String username,
+            Long sessionId,
+            String assistantMessageClientId,
+            String partialAssistantText) {
+        transactionTemplate.executeWithoutResult(status -> {
+            User user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException(USER_NOT_FOUND));
+            chatSessionRepository.findByIdAndUser_Id(sessionId, user.getId())
+                    .orElseThrow(() -> new RuntimeException(SESSION_NOT_FOUND));
+
+            messageRepository
+                    .findByChatSession_IdAndAssistantBubbleClientId(sessionId, assistantMessageClientId)
+                    .ifPresent(message -> {
+                        if (message.isGenerationComplete()) {
+                            return;
+                        }
+                        message.setAiResponse(partialAssistantText == null ? "" : partialAssistantText);
+                        messageRepository.save(message);
+                    });
+        });
+    }
+
+    @Override
     public void persistWebsocketTurn(
             String username,
             ChatStompPayload.Type type,
@@ -160,19 +238,33 @@ public class ChatServiceImpl implements ChatService {
                 target.setUserMessage(userContent);
                 target.setAiResponse(assistantText == null ? "" : assistantText);
                 target.setAssistantBubbleClientId(assistantMessageClientId);
+                target.setGenerationComplete(true);
                 target.setTimestamp(Instant.now());
                 messageRepository.save(target);
                 messageRepository.deleteByChatSession_IdAndIdGreaterThan(session.getId(), target.getId());
             } else {
-                Message message = Message.builder()
-                        .chatSession(session)
-                        .userMessage(userContent)
-                        .aiResponse(assistantText == null ? "" : assistantText)
-                        .timestamp(Instant.now())
-                        .userBubbleClientId(userMessageClientId)
-                        .assistantBubbleClientId(assistantMessageClientId)
-                        .build();
-                messageRepository.save(message);
+                Optional<Message> existing = messageRepository
+                        .findByChatSession_IdAndAssistantBubbleClientId(session.getId(), assistantMessageClientId);
+                if (existing.isPresent()) {
+                    Message message = existing.get();
+                    message.setUserMessage(userContent);
+                    message.setAiResponse(assistantText == null ? "" : assistantText);
+                    message.setUserBubbleClientId(userMessageClientId);
+                    message.setGenerationComplete(true);
+                    message.setTimestamp(Instant.now());
+                    messageRepository.save(message);
+                } else {
+                    Message message = Message.builder()
+                            .chatSession(session)
+                            .userMessage(userContent)
+                            .aiResponse(assistantText == null ? "" : assistantText)
+                            .timestamp(Instant.now())
+                            .userBubbleClientId(userMessageClientId)
+                            .assistantBubbleClientId(assistantMessageClientId)
+                            .generationComplete(true)
+                            .build();
+                    messageRepository.save(message);
+                }
             }
 
             maybeRefreshSessionTitle(session, userContent);

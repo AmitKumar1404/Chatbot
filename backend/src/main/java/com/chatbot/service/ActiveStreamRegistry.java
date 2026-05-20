@@ -29,6 +29,7 @@ public class ActiveStreamRegistry {
      */
     // UPDATED — carries clientStreamId for downstream DONE correlation on STOP
     public void replaceAndStart(String principalName, String streamId, String clientStreamId,
+                                Long sessionId, String assistantMessageClientId,
                                 Supplier<Disposable> subscribeSupplier) {
         activeStreams.compute(principalName, (key, existing) -> {
             if (existing != null) {
@@ -37,10 +38,35 @@ public class ActiveStreamRegistry {
                 existing.disposable().dispose();
             }
             Disposable d = Objects.requireNonNull(subscribeSupplier.get(), "subscribeSupplier");
-            log.info("Stream started — principal={}, streamId={}, clientStreamId={}",
-                    principalName, streamId, clientStreamId);
-            return new ActiveStream(streamId, clientStreamId, d);
+            log.info("Stream started — principal={}, streamId={}, clientStreamId={}, sessionId={}",
+                    principalName, streamId, clientStreamId, sessionId);
+            return new ActiveStream(streamId, clientStreamId, sessionId, assistantMessageClientId, d);
         });
+    }
+
+    /**
+     * Returns metadata for the user's active stream, if any (used after WebSocket reconnect).
+     */
+    public Optional<ActiveStreamStatus> getActiveStreamStatus(String principalName) {
+        ActiveStream current = activeStreams.get(principalName);
+        if (current == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new ActiveStreamStatus(
+                current.clientStreamId(),
+                current.sessionId(),
+                current.assistantMessageClientId()
+        ));
+    }
+
+    /**
+     * Rejects a new /app/chat when the same clientStreamId is already running (duplicate recovery guard).
+     */
+    public boolean isDuplicateClientStream(String principalName, String clientStreamId) {
+        ActiveStream current = activeStreams.get(principalName);
+        return current != null
+                && clientStreamId != null
+                && clientStreamId.equals(current.clientStreamId());
     }
 
     /**
@@ -77,8 +103,20 @@ public class ActiveStreamRegistry {
         });
         return removed.get();
     }
+    public boolean hasActiveStream(String userName) {
+        return activeStreams.containsKey(userName);
+    }
 
-    // UPDATED — ActiveStream now tracks clientStreamId alongside server stream id
-    private record ActiveStream(String streamId, String clientStreamId, Disposable disposable) {
+    public record ActiveStreamStatus(String clientStreamId, Long sessionId, String assistantMessageClientId) {
+    }
+
+    // UPDATED — ActiveStream tracks reconnect metadata alongside server stream id
+    private record ActiveStream(
+            String streamId,
+            String clientStreamId,
+            Long sessionId,
+            String assistantMessageClientId,
+            Disposable disposable
+    ) {
     }
 }

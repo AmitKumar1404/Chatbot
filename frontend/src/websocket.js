@@ -50,17 +50,40 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
       if (onError) onError(frame);
     },
 
-    onWebSocketError: (error) => {
-      console.error('[WS] WebSocket error:', error);
-      if (onError) onError(error);
+    // onWebSocketError: (error) => {
+    //   console.error('[WS] WebSocket error:', error);
+    //   if (onError) onError(error);
+    // },
+    onWebSocketError: () => {
+
+      // backend restart/offline ke time normal behavior
+    
+      if (onError) {
+        onError();
+      }
     },
 
-  //   onWebSocketClose: (event) => {
-  //     console.warn('[WS] WebSocket closed:', event);
-  //   },
-  // });
+  // onWebSocketClose: (event) => {
+  //   console.warn('[WS] WebSocket closed:', event);
+  
+  //   if (onError) {
+  //     onError();
+  //   }
+  // },
   onWebSocketClose: (event) => {
-    console.warn('[WS] WebSocket closed:', event);
+
+    // 1000 = normal close
+    // 1001 = server restart/navigation
+    // 1006 = backend temporarily unavailable
+  
+    const expected =
+      event.code === 1000 ||
+      event.code === 1001 ||
+      event.code === 1006;
+  
+    if (!expected) {
+      console.warn('[WS] WebSocket closed:', event);
+    }
   
     if (onError) {
       onError();
