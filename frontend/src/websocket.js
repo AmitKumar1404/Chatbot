@@ -2,16 +2,20 @@ import { Client } from '@stomp/stompjs';
 import { wsChatUrl } from './apiConfig';
 
 let stompClient = null;
+let activeConnectionId = 0;
+let activeSubscription = null;
 
 export function connectWebSocket({ accessToken, onMessage, onConnect, onError }) {
   if (!accessToken) {
     console.warn('[WS] connectWebSocket called without accessToken');
-    return;
+    return null;
   }
 
   disconnectWebSocket();
 
-  stompClient = new Client({
+  const connectionId = ++activeConnectionId;
+  let connectAttempt = 0;
+  const client = new Client({
     brokerURL: wsChatUrl(),
 
     reconnectDelay: 5000,
@@ -22,76 +26,93 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
 
     debug: (msg) => console.debug('[STOMP debug]', msg),
 
-    onConnect: (frame) => {
-      console.log('[WS] Connected. Frame:', frame);
-
-      const sub = stompClient.subscribe('/user/queue/messages', (message) => {
-        console.debug('[WS] Message received on /user/queue/messages:', message.body);
-        onMessage(message.body);
-      });
-      console.log('[WS] Subscribed to /user/queue/messages — id:', sub.id);
-
-      if (onConnect) onConnect();
+    beforeConnect: () => {
+      connectAttempt += 1;
+      console.info("[WS] STOMP connect attempt", { connectionId, connectAttempt });
     },
 
-    // onDisconnect: () => {
-    //   console.warn('[WS] Disconnected');
-    // },
-    onDisconnect: () => {
-      console.warn('[WS] Disconnected');
-    
-      if (onError) {
-        onError();
+    onConnect: (frame) => {
+      if (client !== stompClient) {
+        console.debug('[WS] Ignoring stale onConnect callback', { connectionId });
+        return;
       }
+      console.info('[WS] Connected', { connectionId, frame });
+
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
+      }
+
+      activeSubscription = client.subscribe('/user/queue/messages', (message) => {
+        if (client !== stompClient) {
+          console.debug('[WS] Ignoring message from stale client', { connectionId });
+          return;
+        }
+        console.debug('[WS] Message received on /user/queue/messages:', message.body);
+        onMessage(message.body, { connectionId });
+      });
+      console.info('[WS] Subscribed to /user/queue/messages', {
+        connectionId,
+        subscriptionId: activeSubscription.id,
+      });
+
+      if (onConnect) onConnect({ connectionId, frame });
+    },
+
+    onDisconnect: () => {
+      if (client !== stompClient) {
+        return;
+      }
+      console.warn('[WS] Disconnected', { connectionId });
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
+      }
+      if (onError) onError({ connectionId, reason: 'disconnect' });
     },
 
     onStompError: (frame) => {
-      console.error('[WS] STOMP broker error:', frame.headers['message'], frame);
-      if (onError) onError(frame);
-    },
-
-    // onWebSocketError: (error) => {
-    //   console.error('[WS] WebSocket error:', error);
-    //   if (onError) onError(error);
-    // },
-    onWebSocketError: () => {
-
-      // backend restart/offline ke time normal behavior
-    
-      if (onError) {
-        onError();
+      if (client !== stompClient) {
+        return;
       }
+      console.error('[WS] STOMP broker error:', frame.headers['message'], frame);
+      if (onError) onError({ connectionId, reason: 'stomp-error', frame });
     },
 
-  // onWebSocketClose: (event) => {
-  //   console.warn('[WS] WebSocket closed:', event);
-  
-  //   if (onError) {
-  //     onError();
-  //   }
-  // },
-  onWebSocketClose: (event) => {
+    onWebSocketError: (error) => {
+      if (client !== stompClient) {
+        return;
+      }
+      console.warn('[WS] WebSocket error', { connectionId, error });
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
+      }
+      if (onError) onError({ connectionId, reason: 'ws-error', error });
+    },
 
-    // 1000 = normal close
-    // 1001 = server restart/navigation
-    // 1006 = backend temporarily unavailable
-  
-    const expected =
-      event.code === 1000 ||
-      event.code === 1001 ||
-      event.code === 1006;
-  
-    if (!expected) {
-      console.warn('[WS] WebSocket closed:', event);
-    }
-  
-    if (onError) {
-      onError();
-    }
-  },
-});
-  console.log('[WS] Activating STOMP client…');
-  stompClient.activate();
+    onWebSocketClose: (event) => {
+      if (client !== stompClient) {
+        return;
+      }
+      console.warn('[WS] WebSocket closed', {
+        connectionId,
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+      });
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
+      }
+      if (onError) onError({ connectionId, reason: 'ws-close', event });
+    },
+  });
+
+  stompClient = client;
+  console.info('[WS] Activating STOMP client', { connectionId });
+  client.activate();
+  return connectionId;
 }
 
 const JSON_CT = { 'content-type': 'application/json' };
@@ -124,7 +145,12 @@ export function sendStopSignal() {
 
 export function disconnectWebSocket() {
   if (stompClient) {
+    if (activeSubscription) {
+      activeSubscription.unsubscribe();
+      activeSubscription = null;
+    }
     stompClient.deactivate();
     stompClient = null;
+    activeConnectionId += 1;
   }
 }

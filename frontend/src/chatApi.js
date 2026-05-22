@@ -23,19 +23,22 @@ export async function createChatSession(token) {
   return res.json();
 }
 
-export async function fetchSessionMessages(token, sessionId) {
+export async function fetchSessionMessages(token, sessionId, options = {}) {
+  const { signal } = options;
   const res = await fetch(
     `${API_BASE_URL}/chat/sessions/${sessionId}/messages`,
-    { headers: authHeaders(token) }
+    { headers: authHeaders(token), signal }
   );
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json();
 }
 
 /** Returns active stream metadata, or null when no stream is in flight. */
-export async function fetchActiveStream(token) {
+export async function fetchActiveStream(token, options = {}) {
+  const { signal } = options;
   const res = await fetch(`${API_BASE_URL}/chat/stream/active`, {
     headers: authHeaders(token),
+    signal,
   });
   if (res.status === 204 || res.status === 404) return null;
   if (!res.ok) throw new Error("Failed to load active stream status");
