@@ -18,6 +18,32 @@ import {
 } from "./chatApi";
 import "./App.css";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
+// import { PanelLeftClose, PanelLeftOpen, Menu } from "lucide-react";
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  Menu,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
+
+const SIDEBAR_DESKTOP_STORAGE_KEY = "chatbot.sidebar.desktop.collapsed";
+const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
+
+function getInitialDesktopSidebarCollapsed() {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_DESKTOP_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function getInitialIsDesktopViewport() {
+  if (typeof window === "undefined") return true;
+  return window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
+}
 
 function buildPriorDtos(messages) {
   return messages
@@ -80,6 +106,15 @@ export default function ChatApp() {
   const [isRecovering, setIsRecovering] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [openChatMenuId, setOpenChatMenuId] = useState(null);
+
+  const [isDesktopViewport, setIsDesktopViewport] = useState(
+    getInitialIsDesktopViewport
+  );
+  const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(
+    getInitialDesktopSidebarCollapsed
+  );
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   const stopRef = useRef(false);
   const recoveryPollRef = useRef(null);
@@ -102,6 +137,92 @@ export default function ChatApp() {
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const media = window.matchMedia(DESKTOP_MEDIA_QUERY);
+    const updateViewport = (event) => {
+      setIsDesktopViewport(event.matches);
+      if (event.matches) {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+
+    updateViewport(media);
+
+    if (media.addEventListener) {
+      media.addEventListener("change", updateViewport);
+      return () => media.removeEventListener("change", updateViewport);
+    }
+
+    media.addListener(updateViewport);
+    return () => media.removeListener(updateViewport);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_DESKTOP_STORAGE_KEY,
+        isDesktopSidebarCollapsed ? "1" : "0"
+      );
+    } catch {
+      // Ignore write failures in private browsing environments.
+    }
+  }, [isDesktopSidebarCollapsed]);
+
+  const isSidebarCollapsed = isDesktopViewport && isDesktopSidebarCollapsed;
+  const isMobileDrawerOpen = !isDesktopViewport && isMobileSidebarOpen;
+
+  useEffect(() => {
+    if (!isMobileDrawerOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isMobileDrawerOpen]);
+
+  useEffect(() => {
+    if (!isMobileDrawerOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobileDrawerOpen]);
+
+  useEffect(() => {
+    if (isSidebarCollapsed) {
+      setShowProfileMenu(false);
+    }
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    function handleOutsideClick(event) {
+      if (event.target instanceof Element && event.target.closest(".chat-actions")) {
+        return;
+      }
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".chat-dropdown-menu")
+      ) {
+        return;
+      }
+      if (openChatMenuId !== null) {
+        setOpenChatMenuId(null);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [openChatMenuId]);
 
   const loadSessions = useCallback(async () => {
     if (!token) return;
@@ -173,6 +294,9 @@ export default function ChatApp() {
   const selectChat = useCallback(
     async (chatId) => {
       setActiveChatId(chatId);
+      if (!isDesktopViewport) {
+        setIsMobileSidebarOpen(false);
+      }
       if (!token) return;
       const snap = chatsRef.current.find((c) => c.id === chatId);
       if (!snap || snap.messagesLoaded) return;
@@ -188,7 +312,7 @@ export default function ChatApp() {
         console.error(e);
       }
     },
-    [token]
+    [isDesktopViewport, token]
   );
 
   const finalizeStream = useCallback(() => {
@@ -288,8 +412,7 @@ export default function ChatApp() {
       };
 
       if (type === "EDIT") {
-        payload.editTargetMessageId =
-          streamEditTargetRef.current ?? user.id;
+        payload.editTargetMessageId = streamEditTargetRef.current ?? user.id;
       } else {
         payload.userMessageId = streamUserMessageIdRef.current ?? user.id;
       }
@@ -371,8 +494,6 @@ export default function ChatApp() {
         return;
       }
 
-      // Backend restart kills the in-memory Ollama subscription and ActiveStreamRegistry.
-      // Polling DB alone cannot resume tokens — re-dispatch /app/chat on the new JVM.
       if (!active) {
         restartInterruptedGeneration(targetChatId, assistantId, clientStreamId);
       }
@@ -522,12 +643,12 @@ export default function ChatApp() {
   const displayStatusText = !token
     ? "Not signed in"
     : isRecovering
-      ? "Resuming…"
-      : isBrowserOffline
-        ? "No internet"
-        : connected
-          ? "Connected"
-          : statusText;
+    ? "Resuming…"
+    : isBrowserOffline
+    ? "No internet"
+    : connected
+    ? "Connected"
+    : statusText;
 
   function handleSend(text) {
     if (isStreamingRef.current || !connected || isBrowserOffline) {
@@ -606,7 +727,8 @@ export default function ChatApp() {
 
   const handleEditSave = useCallback(
     (userMessageId, newText) => {
-      if (isStreamingRef.current || !connected || isBrowserOffline) return false;
+      if (isStreamingRef.current || !connected || isBrowserOffline)
+        return false;
 
       const trimmed = (newText ?? "").trim();
       if (!trimmed) return false;
@@ -687,6 +809,9 @@ export default function ChatApp() {
 
   function createNewChat() {
     if (isStreamingRef.current) return;
+    if (!isDesktopViewport) {
+      setIsMobileSidebarOpen(false);
+    }
 
     // ✅ already blank chat open hai
     const existingBlankChat = chatsRef.current.find(
@@ -716,6 +841,33 @@ export default function ChatApp() {
 
     activeChatIdRef.current = tempId;
   }
+
+  // function handleSidebarToggle() {
+  //   if (isDesktopViewport) {
+  //     setIsDesktopSidebarCollapsed((prev) => !prev);
+  //     return;
+  //   }
+  //   setIsMobileSidebarOpen((prev) => !prev);
+  // }
+  function handleSidebarToggle() {
+    setOpenChatMenuId(null);
+
+    if (isDesktopViewport) {
+      setIsDesktopSidebarCollapsed((prev) => !prev);
+      return;
+    }
+
+    setIsMobileSidebarOpen((prev) => !prev);
+  }
+
+  const sidebarToggleAriaLabel = isDesktopViewport
+    ? isSidebarCollapsed
+      ? "Expand sidebar"
+      : "Collapse sidebar"
+    : isMobileDrawerOpen
+    ? "Close sidebar"
+    : "Open sidebar";
+
   async function createRealChatAndSend(text) {
     if (!token || isStreamingRef.current) return;
 
@@ -790,45 +942,135 @@ export default function ChatApp() {
 
   return (
     <div className="app-layout">
-      <div className={`sidebar ${isStreaming ? "sidebar-busy" : ""}`}>
-        <button className="new-chat-btn" onClick={createNewChat}>
-          + New Chat
-        </button>
+      {isMobileDrawerOpen && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          aria-label="Close sidebar"
+        />
+      )}
+      <div
+        className={`sidebar ${isStreaming ? "sidebar-busy" : ""} ${
+          isSidebarCollapsed ? "sidebar-collapsed" : "sidebar-expanded"
+        } ${!isDesktopViewport ? "sidebar-mobile" : ""} ${
+          isMobileDrawerOpen ? "sidebar-mobile-open" : "sidebar-mobile-closed"
+        }`}
+      >
+        {isDesktopViewport && (
+          <button
+            type="button"
+            className="sidebar-menu-btn sidebar-desktop-toggle-btn"
+            onClick={handleSidebarToggle}
+            aria-label={sidebarToggleAriaLabel}
+          >
+            {isSidebarCollapsed ? (
+              <PanelLeftOpen size={20} />
+            ) : (
+              <PanelLeftClose size={20} />
+            )}
+          </button>
+        )}
+        <div className="new-chat-tooltip-wrapper">
+          <button
+            className={`new-chat-btn ${isSidebarCollapsed ? "icon-only" : ""}`}
+            onClick={createNewChat}
+            aria-label="New Chat"
+          >
+            {isSidebarCollapsed ? (
+              <span aria-hidden="true">＋</span>
+            ) : (
+              "+ New Chat"
+            )}
+          </button>
 
-        <div className="chat-list">
-          {chats.map((chat) => (
-            <div
-              key={chat.id}
-              className={`chat-item ${
-                chat.id === activeChatId ? "active" : ""
-              }`}
-            >
-              <span onClick={() => selectChat(chat.id)}>{chat.title}</span>
-
-              <div className="chat-actions">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    renameChat(chat.id);
-                  }}
-                >
-                  ✏️
-                </button>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteChat(chat.id);
-                  }}
-                >
-                  🗑
-                </button>
-              </div>
-            </div>
-          ))}
+          {isSidebarCollapsed && (
+            <div className="sidebar-tooltip">New Chat</div>
+          )}
         </div>
+
+        {!isSidebarCollapsed && (
+          <div className="chat-list">
+            {chats.map((chat) => (
+              <div
+                key={chat.id}
+                className={`chat-item ${
+                  chat.id === activeChatId ? "active" : ""
+                }`}
+              >
+                <span onClick={() => selectChat(chat.id)}>{chat.title}</span>
+
+                {/* <div className="chat-actions">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      renameChat(chat.id);
+                    }}
+                  >
+                    ✏️
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteChat(chat.id);
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div> */}
+                {/* <div className="chat-actions"> */}
+                <div className="chat-actions">
+                  <button
+                    type="button"
+                    className="chat-menu-trigger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+
+                      setOpenChatMenuId((prev) =>
+                        prev === chat.id ? null : chat.id
+                      );
+                    }}
+                  >
+                    <MoreHorizontal size={18} />
+                  </button>
+
+                  {openChatMenuId === chat.id && (
+                    <div className="chat-dropdown-menu">
+                      <button
+                        type="button"
+                        className="chat-dropdown-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenChatMenuId(null);
+                          renameChat(chat.id);
+                        }}
+                      >
+                        <Pencil size={15} />
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        className="chat-dropdown-item delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenChatMenuId(null);
+                          deleteChat(chat.id);
+                        }}
+                      >
+                        <Trash2 size={15} />
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="sidebar-footer">
           <div
             className="profile-wrapper"
@@ -836,7 +1078,9 @@ export default function ChatApp() {
           >
             <div className="profile-circle">{userInitial}</div>
 
-            <div className="profile-name">{username?.split(" ")[0]}</div>
+            {!isSidebarCollapsed && (
+              <div className="profile-name">{username?.split(" ")[0]}</div>
+            )}
 
             {showProfileMenu && (
               <div className="profile-dropdown">
@@ -856,9 +1100,29 @@ export default function ChatApp() {
         </div>
       </div>
 
-      <div className="chat-section">
+      <div
+        className={`chat-section ${
+          isSidebarCollapsed ? "chat-section-collapsed" : ""
+        }`}
+      >
         <header className="app-header">
-          <h1 className="app-title">Talk To Me</h1>
+          <div className="header-title-wrap">
+            {!isDesktopViewport && (
+              <button
+                type="button"
+                className="sidebar-menu-btn"
+                onClick={handleSidebarToggle}
+                aria-label={sidebarToggleAriaLabel}
+              >
+                {isMobileDrawerOpen ? (
+                  <PanelLeftClose size={20} />
+                ) : (
+                  <Menu size={20} />
+                )}
+              </button>
+            )}
+            <h1 className="app-title">Talk To Me</h1>
+          </div>
           <div className="header-actions">
             <span
               className={`status-badge ${
@@ -868,8 +1132,8 @@ export default function ChatApp() {
                 isBrowserOffline
                   ? "No internet connection detected"
                   : connected
-                    ? "WebSocket connected"
-                    : "WebSocket disconnected"
+                  ? "WebSocket connected"
+                  : "WebSocket disconnected"
               }
             >
               {displayStatusText}
