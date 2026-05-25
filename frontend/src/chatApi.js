@@ -62,3 +62,15 @@ export async function updateChatSessionTitleApi(token, sessionId, title) {
   if (!res.ok) throw new Error("Failed to rename chat session");
   return res.json();
 }
+
+export async function searchChatsApi(token, query) {
+  const trimmed = (query ?? "").trim();
+  if (!trimmed) return [];
+
+  const params = new URLSearchParams({ q: trimmed });
+  const res = await fetch(`${API_BASE_URL}/search?${params.toString()}`, {
+    headers: authHeaders(token),
+  });
+  if (!res.ok) throw new Error("Failed to search chats");
+  return res.json();
+}

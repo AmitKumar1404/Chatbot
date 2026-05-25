@@ -204,6 +204,45 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "SearchController",
+			"item": [
+				{
+					"name": "Search chats/messages",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/search?q=hello",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"search"
+							],
+							"query": [
+								{
+									"key": "q",
+									"value": "hello",
+									"description": "Search keyword for session titles and message content"
+								}
+							]
+						},
+						"description": "GET /search?q={keyword} (served at /api/v1/search)"
+					}
+				}
+			]
 		}
 	]
 }

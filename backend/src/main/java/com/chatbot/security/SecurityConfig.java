@@ -18,6 +18,7 @@ import static com.chatbot.constant.AppConstants.AUTH_LOGIN_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REGISTER_PATH;
 import static com.chatbot.constant.AppConstants.CHAT_ALL;
 import static com.chatbot.constant.AppConstants.H2_CONSOLE_ALL;
+import static com.chatbot.constant.AppConstants.SEARCH_ALL;
 import static com.chatbot.constant.AppConstants.WS_CHAT_ALL;
 
 @Configuration
@@ -46,7 +47,7 @@ public class SecurityConfig {
                                 AUTH_BASE_PATH + AUTH_LOGIN_PATH,
                                 AUTH_BASE_PATH + AUTH_REGISTER_PATH).permitAll()
                         .requestMatchers(H2_CONSOLE_ALL, WS_CHAT_ALL).permitAll()
-                        .requestMatchers(CHAT_ALL).authenticated()
+                        .requestMatchers(CHAT_ALL, SEARCH_ALL).authenticated()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
