@@ -9,10 +9,12 @@ public final class AppConstants {
     public static final String AUTH_REGISTER_PATH = "/register";
     public static final String AUTH_LOGIN_PATH = "/login";
     public static final String CHAT_BASE_PATH = "/chat";
+    public static final String SEARCH_BASE_PATH = "/search";
     public static final String H2_CONSOLE_PATH = "/h2-console";
 
     public static final String AUTH_ALL = "/auth/**";
     public static final String CHAT_ALL = "/chat/**";
+    public static final String SEARCH_ALL = "/search/**";
     public static final String H2_CONSOLE_ALL = "/h2-console/**";
     public static final String WS_CHAT_ALL = "/ws-chat/**";
 
