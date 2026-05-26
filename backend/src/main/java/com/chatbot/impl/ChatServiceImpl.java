@@ -11,8 +11,10 @@ import com.chatbot.repository.MessageRepository;
 import com.chatbot.repository.UserRepository;
 import com.chatbot.service.AIService;
 import com.chatbot.service.ChatService;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -87,6 +89,18 @@ public class ChatServiceImpl implements ChatService {
         chatSessionRepository.findByIdAndUser_Id(sessionId, user.getId())
                 .orElseThrow(() -> new RuntimeException(SESSION_NOT_FOUND));
         return messageRepository.findByChatSession_IdOrderByTimestampAsc(sessionId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Message> getMessages(Long sessionId, int page, int size) {
+        User user = resolveCurrentUser();
+        chatSessionRepository.findByIdAndUser_Id(sessionId, user.getId())
+                .orElseThrow(() -> new RuntimeException(SESSION_NOT_FOUND));
+        return messageRepository.findPageByChatSessionId(
+                sessionId,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "timestamp"))
+        ).getContent();
     }
 
     @Override

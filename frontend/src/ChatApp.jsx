@@ -210,7 +210,10 @@ export default function ChatApp() {
 
   useEffect(() => {
     function handleOutsideClick(event) {
-      if (event.target instanceof Element && event.target.closest(".chat-actions")) {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".chat-actions")
+      ) {
         return;
       }
       if (
@@ -350,7 +353,12 @@ export default function ChatApp() {
       setIsSearching(false);
     }
   }, [searchQuery, token]);
-
+  function handleClearSearch() {
+    setSearchQuery("");
+    setSearchResults([]);
+    setHasSearched(false);
+    setSearchedQuery("");
+  }
   function handleSearchQueryChange(value) {
     setSearchQuery(value);
     if (!value.trim()) {
@@ -1050,9 +1058,12 @@ export default function ChatApp() {
               value={searchQuery}
               onChange={handleSearchQueryChange}
               onSearch={handleSearch}
+              onClear={handleClearSearch}
               isLoading={isSearching}
             />
-            {isSearching && <div className="sidebar-search-status">Searching...</div>}
+            {isSearching && (
+              <div className="sidebar-search-status">Searching...</div>
+            )}
           </>
         )}
 
@@ -1142,11 +1153,15 @@ export default function ChatApp() {
         {!isSidebarCollapsed && isSearchView && (
           <div className="chat-list search-results-list">
             {searchResults.length === 0 ? (
-              <p className="sidebar-search-status">No matching chats or messages found.</p>
+              <p className="sidebar-search-status">
+                No matching chats or messages found.
+              </p>
             ) : (
               searchResults.map((result, index) => (
                 <button
-                  key={`${result.sessionId}-${result.messageId ?? "session"}-${index}`}
+                  key={`${result.sessionId}-${
+                    result.messageId ?? "session"
+                  }-${index}`}
                   type="button"
                   className={`chat-item chat-search-item ${
                     result.sessionId === activeChatId ? "active" : ""

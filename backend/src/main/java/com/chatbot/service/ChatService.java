@@ -16,6 +16,8 @@ public interface ChatService {
 
     List<Message> getMessages(Long sessionId);
 
+    List<Message> getMessages(Long sessionId, int page, int size);
+
     ChatSession createEmptySession();
 
     void deleteSession(Long sessionId);
