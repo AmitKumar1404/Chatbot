@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ChatWindow from "./components/ChatWindow";
 import InputBox from "./components/InputBox";
+import SearchBar from "./components/SearchBar";
 import {
   connectWebSocket,
   sendMessage,
@@ -15,6 +16,7 @@ import {
   fetchActiveStream,
   deleteChatSessionApi,
   updateChatSessionTitleApi,
+  searchChatsApi,
 } from "./chatApi";
 import "./App.css";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
@@ -107,6 +109,11 @@ export default function ChatApp() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchedQuery, setSearchedQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
 
   const [isDesktopViewport, setIsDesktopViewport] = useState(
     getInitialIsDesktopViewport
@@ -290,6 +297,10 @@ export default function ChatApp() {
 
   const activeChat = chats.find((c) => c.id === activeChatId);
   const userInitial = username?.charAt(0)?.toUpperCase() || "?";
+  const isSearchView =
+    searchQuery.trim().length > 0 &&
+    hasSearched &&
+    searchQuery.trim() === searchedQuery;
 
   const selectChat = useCallback(
     async (chatId) => {
@@ -314,6 +325,50 @@ export default function ChatApp() {
     },
     [isDesktopViewport, token]
   );
+
+  const handleSearch = useCallback(async () => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed || !token) {
+      setHasSearched(false);
+      setSearchedQuery("");
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const rows = await searchChatsApi(token, trimmed);
+      setSearchResults(Array.isArray(rows) ? rows : []);
+      setSearchedQuery(trimmed);
+      setHasSearched(true);
+    } catch (error) {
+      console.error(error);
+      setSearchResults([]);
+      setSearchedQuery(trimmed);
+      setHasSearched(true);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [searchQuery, token]);
+
+  function handleSearchQueryChange(value) {
+    setSearchQuery(value);
+    if (!value.trim()) {
+      setHasSearched(false);
+      setSearchedQuery("");
+      setSearchResults([]);
+      return;
+    }
+
+    if (value.trim() !== searchedQuery) {
+      setHasSearched(false);
+    }
+  }
+
+  function handleSearchResultClick(sessionId) {
+    setOpenChatMenuId(null);
+    selectChat(sessionId);
+  }
 
   const finalizeStream = useCallback(() => {
     clearRecoveryPoll();
@@ -990,6 +1045,18 @@ export default function ChatApp() {
         </div>
 
         {!isSidebarCollapsed && (
+          <>
+            <SearchBar
+              value={searchQuery}
+              onChange={handleSearchQueryChange}
+              onSearch={handleSearch}
+              isLoading={isSearching}
+            />
+            {isSearching && <div className="sidebar-search-status">Searching...</div>}
+          </>
+        )}
+
+        {!isSidebarCollapsed && !isSearchView && (
           <div className="chat-list">
             {chats.map((chat) => (
               <div
@@ -1069,6 +1136,32 @@ export default function ChatApp() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {!isSidebarCollapsed && isSearchView && (
+          <div className="chat-list search-results-list">
+            {searchResults.length === 0 ? (
+              <p className="sidebar-search-status">No matching chats or messages found.</p>
+            ) : (
+              searchResults.map((result, index) => (
+                <button
+                  key={`${result.sessionId}-${result.messageId ?? "session"}-${index}`}
+                  type="button"
+                  className={`chat-item chat-search-item ${
+                    result.sessionId === activeChatId ? "active" : ""
+                  }`}
+                  onClick={() => handleSearchResultClick(result.sessionId)}
+                >
+                  <span className="chat-search-title">
+                    {result.sessionTitle || "New chat"}
+                  </span>
+                  <span className="chat-search-snippet">
+                    {result.content || result.matchType}
+                  </span>
+                </button>
+              ))
+            )}
           </div>
         )}
         <div className="sidebar-footer">
