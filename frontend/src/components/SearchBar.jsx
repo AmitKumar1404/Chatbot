@@ -1,9 +1,10 @@
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 export default function SearchBar({
   value,
   onChange,
   onSearch,
+  onClear,
   isLoading = false,
   disabled = false,
 }) {
@@ -20,19 +21,32 @@ export default function SearchBar({
       <input
         type="text"
         className="sidebar-search-input"
-        placeholder="Search chats or messages..."
+        placeholder="Search chats..."
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-label="Search chats or messages"
       />
-      <button
-        type="submit"
-        className="sidebar-search-btn"
-        aria-label="Search"
-        disabled={!canSearch}
-      >
-        <Search size={16} />
-      </button>
+      <>
+        {value.trim().length > 0 && (
+          <button
+            type="button"
+            className="sidebar-search-clear"
+            onClick={onClear}
+            aria-label="Clear search"
+          >
+            <X size={16} />
+          </button>
+        )}
+
+        <button
+          type="submit"
+          className="sidebar-search-btn"
+          aria-label="Search"
+          disabled={!canSearch}
+        >
+          <Search size={16} />
+        </button>
+      </>
     </form>
   );
 }
