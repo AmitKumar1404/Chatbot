@@ -2,6 +2,18 @@ import { Client } from '@stomp/stompjs';
 import { wsChatUrl } from './apiConfig';
 
 let stompClient = null;
+let manualDisconnectInProgress = false;
+let reconnectAttempts = 0;
+let reconnectLimitReached = false;
+
+const RECONNECT_DELAY_MS = 5000;
+const MAX_RECONNECT_ATTEMPTS = 12;
+const HEARTBEAT_INTERVAL_MS = 20000;
+
+function resetReconnectGuards() {
+  reconnectAttempts = 0;
+  reconnectLimitReached = false;
+}
 
 export function connectWebSocket({ accessToken, onMessage, onConnect, onError }) {
   if (!accessToken) {
@@ -10,11 +22,15 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
   }
 
   disconnectWebSocket();
+  manualDisconnectInProgress = false;
+  resetReconnectGuards();
 
   stompClient = new Client({
     brokerURL: wsChatUrl(),
 
-    reconnectDelay: 5000,
+    reconnectDelay: RECONNECT_DELAY_MS,
+    heartbeatIncoming: HEARTBEAT_INTERVAL_MS,
+    heartbeatOutgoing: HEARTBEAT_INTERVAL_MS,
 
     connectHeaders: {
       Authorization: `Bearer ${accessToken}`,
@@ -24,6 +40,7 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
 
     onConnect: (frame) => {
       console.log('[WS] Connected. Frame:', frame);
+      resetReconnectGuards();
 
       const sub = stompClient.subscribe('/user/queue/messages', (message) => {
         console.debug('[WS] Message received on /user/queue/messages:', message.body);
@@ -76,6 +93,17 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
     // 1001 = server restart/navigation
     // 1006 = backend temporarily unavailable
   
+    if (!manualDisconnectInProgress && !reconnectLimitReached) {
+      reconnectAttempts += 1;
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        reconnectLimitReached = true;
+        if (stompClient) {
+          stompClient.reconnectDelay = 0;
+        }
+        console.error('[WS] Reconnect attempt limit reached; auto-reconnect paused.');
+      }
+    }
+
     const expected =
       event.code === 1000 ||
       event.code === 1001 ||
@@ -124,7 +152,9 @@ export function sendStopSignal() {
 
 export function disconnectWebSocket() {
   if (stompClient) {
+    manualDisconnectInProgress = true;
     stompClient.deactivate();
     stompClient = null;
   }
+  resetReconnectGuards();
 }

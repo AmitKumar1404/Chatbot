@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 
 const SIDEBAR_DESKTOP_STORAGE_KEY = "chatbot.sidebar.desktop.collapsed";
+const STREAM_OWNERSHIP_STORAGE_KEY = "chatbot.stream.ownership";
 const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 function getInitialDesktopSidebarCollapsed() {
@@ -47,6 +48,20 @@ function getInitialIsDesktopViewport() {
   return window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
 }
 
+function readStreamOwnership() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(STREAM_OWNERSHIP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed.clientStreamId || !parsed.assistantMessageId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function buildPriorDtos(messages) {
   return messages
     .filter((m) => m && (m.role === "user" || m.role === "assistant"))
@@ -54,19 +69,27 @@ function buildPriorDtos(messages) {
     .map((m) => ({ role: m.role, content: m.content ?? "" }));
 }
 
-function mapDbMessageToUi(m) {
+function mapDbMessageToUi(m, options = {}) {
   const uid = m.userBubbleClientId || `legacy-u-${m.id}`;
   const aid = m.assistantBubbleClientId || `legacy-a-${m.id}`;
-  const assistantStreaming = m.generationComplete === false;
+  const allowIncompleteAssistant = options?.allowIncompleteAssistant !== false;
+  const assistantStreaming =
+    m.generationComplete === false && allowIncompleteAssistant;
+  const userMessage = {
+    id: uid,
+    role: "user",
+    content: m.userMessage ?? "",
+    responseTo: null,
+    editing: false,
+    streaming: false,
+  };
+
+  if (m.generationComplete === false && !allowIncompleteAssistant) {
+    return [userMessage];
+  }
+
   return [
-    {
-      id: uid,
-      role: "user",
-      content: m.userMessage ?? "",
-      responseTo: null,
-      editing: false,
-      streaming: false,
-    },
+    userMessage,
     {
       id: aid,
       role: "assistant",
@@ -78,19 +101,111 @@ function mapDbMessageToUi(m) {
   ];
 }
 
-function mergeDbMessagesWithActiveStream(localMessages, dbRows, assistantId) {
-  const dbUi = dbRows.flatMap(mapDbMessageToUi);
+function shouldAllowIncompleteAssistant({
+  row,
+  chatId,
+  ownedStream,
+  username,
+}) {
+  if (row?.generationComplete !== false) return false;
+  if (!ownedStream?.assistantMessageId) return false;
+  if (!row?.assistantBubbleClientId) return false;
+  if (ownedStream.username && username && ownedStream.username !== username) {
+    return false;
+  }
+  if (ownedStream.assistantMessageId !== row.assistantBubbleClientId) {
+    return false;
+  }
+  if (ownedStream.sessionId != null && chatId != null) {
+    return Number(ownedStream.sessionId) === Number(chatId);
+  }
+  return true;
+}
+
+function mapDbRowsToUi(rows, { chatId, ownedStream, username }) {
+  return rows.flatMap((row) =>
+    mapDbMessageToUi(row, {
+      allowIncompleteAssistant: shouldAllowIncompleteAssistant({
+        row,
+        chatId,
+        ownedStream,
+        username,
+      }),
+    })
+  );
+}
+
+function hasSuppressedIncompleteAssistant(rows, { chatId, ownedStream, username }) {
+  return rows.some(
+    (row) =>
+      row?.generationComplete === false &&
+      !shouldAllowIncompleteAssistant({
+        row,
+        chatId,
+        ownedStream,
+        username,
+      })
+  );
+}
+
+function chooseRecoveredAssistantContent(
+  localContent,
+  dbContent,
+  preferLocalWhileRestarting
+) {
+  if (!localContent) return dbContent;
+  if (!dbContent) return localContent;
+
+  if (preferLocalWhileRestarting) {
+    return localContent;
+  }
+
+  // Keep whichever side is ahead only when one is a clean prefix of the other.
+  // If they diverge, trust DB as authoritative to avoid mixed/corrupted UI text.
+  if (dbContent.startsWith(localContent)) return dbContent;
+  if (localContent.startsWith(dbContent)) return localContent;
+  return dbContent;
+}
+
+function mergeDbMessagesWithActiveStream(
+  localMessages,
+  dbRows,
+  assistantId,
+  options = {}
+) {
+  const dbUi = mapDbRowsToUi(dbRows, {
+    chatId: options.chatId,
+    ownedStream: options.ownedStream,
+    username: options.username,
+  });
   if (!assistantId) return dbUi;
+  const preferLocalWhileRestarting =
+    options.preferLocalWhileRestarting === true;
+  const allowIncompleteAssistant = options.allowIncompleteAssistant === true;
 
   return dbUi.map((m) => {
     if (m.id !== assistantId || m.role !== "assistant") return m;
     const local = localMessages.find((x) => x.id === assistantId);
     const localContent = local?.content ?? "";
     const dbContent = m.content ?? "";
-    const merged =
-      dbContent.length >= localContent.length ? dbContent : localContent;
-    return { ...m, content: merged, streaming: true };
+    const merged = chooseRecoveredAssistantContent(
+      localContent,
+      dbContent,
+      preferLocalWhileRestarting
+    );
+    return {
+      ...m,
+      content: merged,
+      streaming: allowIncompleteAssistant && m.streaming,
+    };
   });
+}
+
+function sanitizeAssistantChunkForUi(chunk, currentContent) {
+  const raw = typeof chunk === "string" ? chunk : String(chunk ?? "");
+  if (!raw) return "";
+  if ((currentContent ?? "").trim().length > 0) return raw;
+  return raw.replace(/^\s*(assistant|user|system)\s*:\s*/i, "");
 }
 
 export default function ChatApp() {
@@ -136,6 +251,7 @@ export default function ChatApp() {
   const streamUserMessageIdRef = useRef(null);
   const streamEditTargetRef = useRef(null);
   const resumeAttemptedForStreamIdRef = useRef(null);
+  const activeStreamBootstrapAttemptedRef = useRef(false);
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -289,6 +405,52 @@ export default function ChatApp() {
     setIsStreaming(value);
   }, []);
 
+  const setOwnedStream = useCallback(
+    ({ clientStreamId, assistantMessageId, sessionId }) => {
+      if (typeof window === "undefined") return;
+      if (!clientStreamId || !assistantMessageId) return;
+      try {
+        window.sessionStorage.setItem(
+          STREAM_OWNERSHIP_STORAGE_KEY,
+          JSON.stringify({
+            username,
+            clientStreamId,
+            assistantMessageId,
+            sessionId: sessionId ?? null,
+          })
+        );
+      } catch {
+        // Ignore private mode/sessionStorage write failures.
+      }
+    },
+    [username]
+  );
+
+  const clearOwnedStream = useCallback(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.removeItem(STREAM_OWNERSHIP_STORAGE_KEY);
+    } catch {
+      // Ignore private mode/sessionStorage write failures.
+    }
+  }, []);
+
+  const isActiveStreamOwnedByThisTab = useCallback(
+    (active) => {
+      if (!active?.clientStreamId || !active?.assistantMessageId) return false;
+      const owned = readStreamOwnership();
+      if (!owned) return false;
+      if (owned.username && username && owned.username !== username) return false;
+      if (owned.clientStreamId !== active.clientStreamId) return false;
+      if (owned.assistantMessageId !== active.assistantMessageId) return false;
+      if (owned.sessionId != null && active.sessionId != null) {
+        return Number(owned.sessionId) === Number(active.sessionId);
+      }
+      return true;
+    },
+    [username]
+  );
+
   const clearRecoveryPoll = useCallback(() => {
     if (recoveryPollRef.current != null) {
       clearInterval(recoveryPollRef.current);
@@ -316,17 +478,35 @@ export default function ChatApp() {
       if (!snap || snap.messagesLoaded) return;
       try {
         const rows = await fetchSessionMessages(token, chatId);
-        const messages = rows.flatMap(mapDbMessageToUi);
+        const ownedStream = readStreamOwnership();
+        const messages = mapDbRowsToUi(rows, {
+          chatId,
+          ownedStream,
+          username,
+        });
+        const containsHiddenIncomplete = hasSuppressedIncompleteAssistant(rows, {
+          chatId,
+          ownedStream,
+          username,
+        });
         setChats((prev) =>
           prev.map((c) =>
-            c.id === chatId ? { ...c, messages, messagesLoaded: true } : c
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages,
+                  // Keep this chat "not fully loaded" while another tab owns an incomplete assistant row.
+                  // This allows a future select to refetch and pick up the completed DB response.
+                  messagesLoaded: !containsHiddenIncomplete,
+                }
+              : c
           )
         );
       } catch (e) {
         console.error(e);
       }
     },
-    [isDesktopViewport, token]
+    [isDesktopViewport, token, username]
   );
 
   const handleSearch = useCallback(async () => {
@@ -409,6 +589,7 @@ export default function ChatApp() {
     resumeAttemptedForStreamIdRef.current = null;
     stopRef.current = false;
     streamChatIdRef.current = null;
+    clearOwnedStream();
     setStreamingState(false);
 
     if (!skipRefetch && token && targetChatId != null) {
@@ -425,17 +606,36 @@ export default function ChatApp() {
         })
         .catch((e) => console.error(e));
     }
-  }, [clearRecoveryPoll, setStreamingState, token]);
+  }, [clearOwnedStream, clearRecoveryPoll, setStreamingState, token]);
 
   const syncMessagesFromServer = useCallback(
     async (chatId, assistantId) => {
       const rows = await fetchSessionMessages(token, chatId);
       const chat = chatsRef.current.find((c) => c.id === chatId);
       const localMessages = chat?.messages ?? [];
+      const ownedStream = readStreamOwnership();
+      const allowIncompleteAssistant = rows.some((row) =>
+        shouldAllowIncompleteAssistant({
+          row,
+          chatId,
+          ownedStream,
+          username,
+        })
+      );
+      const preferLocalWhileRestarting =
+        Boolean(resumeAttemptedForStreamIdRef.current) &&
+        assistantId === streamAssistantMessageIdRef.current;
       const messages = mergeDbMessagesWithActiveStream(
         localMessages,
         rows,
-        assistantId
+        assistantId,
+        {
+          preferLocalWhileRestarting,
+          allowIncompleteAssistant,
+          chatId,
+          ownedStream,
+          username,
+        }
       );
       setChats((prev) =>
         prev.map((c) =>
@@ -445,7 +645,7 @@ export default function ChatApp() {
       const row = rows.find((r) => r.assistantBubbleClientId === assistantId);
       return row == null || row.generationComplete !== false;
     },
-    [token]
+    [token, username]
   );
 
   const buildStreamResumePayload = useCallback(
@@ -617,17 +817,77 @@ export default function ChatApp() {
         }
 
         const row = chat.messages[idx];
+        const safeChunk = sanitizeAssistantChunkForUi(chunk, row.content ?? "");
+        if (!safeChunk) {
+          return {
+            ...chat,
+            messages: chat.messages.map((m, i) =>
+              i === idx ? { ...m, streaming: true } : m
+            ),
+          };
+        }
         return {
           ...chat,
           messages: chat.messages.map((m, i) =>
             i === idx
-              ? { ...m, content: (row.content ?? "") + chunk, streaming: true }
+              ? {
+                  ...m,
+                  content: (row.content ?? "") + safeChunk,
+                  streaming: true,
+                }
               : m
           ),
         };
       })
     );
   }, []);
+
+  useEffect(() => {
+    if (!token || !connected) return;
+    if (isStreamingRef.current) return;
+    if (activeStreamBootstrapAttemptedRef.current) return;
+    if (chats.length === 0) return;
+
+    activeStreamBootstrapAttemptedRef.current = true;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const active = await fetchActiveStream(token);
+        if (cancelled) return;
+        if (!active?.clientStreamId || !active?.assistantMessageId) return;
+        if (!isActiveStreamOwnedByThisTab(active)) return;
+
+        stopRef.current = false;
+        activeClientStreamIdRef.current = active.clientStreamId;
+        streamAssistantMessageIdRef.current = active.assistantMessageId;
+        if (active.sessionId != null) {
+          streamChatIdRef.current = active.sessionId;
+          setActiveChatId((prev) => (prev == null ? active.sessionId : prev));
+        }
+        streamTypeRef.current = "NEW";
+        streamUserMessageIdRef.current = null;
+        streamEditTargetRef.current = null;
+        resumeAttemptedForStreamIdRef.current = null;
+        setStreamingState(true);
+
+        recoverInterruptedStream();
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    chats.length,
+    connected,
+    isActiveStreamOwnedByThisTab,
+    recoverInterruptedStream,
+    setStreamingState,
+    token,
+  ]);
 
   const handleStreamBody = useCallback(
     (raw) => {
@@ -684,6 +944,7 @@ export default function ChatApp() {
       onMessage: handleStreamBody,
       onConnect: () => {
         setConnected(true);
+        activeStreamBootstrapAttemptedRef.current = false;
         if (isStreamingRef.current && activeClientStreamIdRef.current) {
           recoverInterruptedStream();
         } else {
@@ -692,6 +953,7 @@ export default function ChatApp() {
       },
       onError: () => {
         setConnected(false);
+        activeStreamBootstrapAttemptedRef.current = false;
         if (isStreamingRef.current) {
           setStatusText("Reconnecting…");
         } else {
@@ -702,6 +964,22 @@ export default function ChatApp() {
 
     return () => disconnectWebSocket();
   }, [handleStreamBody, recoverInterruptedStream, token]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const cleanupSocketOnPageExit = () => {
+      disconnectWebSocket();
+    };
+
+    window.addEventListener("beforeunload", cleanupSocketOnPageExit);
+    window.addEventListener("pagehide", cleanupSocketOnPageExit);
+
+    return () => {
+      window.removeEventListener("beforeunload", cleanupSocketOnPageExit);
+      window.removeEventListener("pagehide", cleanupSocketOnPageExit);
+    };
+  }, [token]);
 
   const displayStatusText = !token
     ? "Not signed in"
@@ -743,6 +1021,11 @@ export default function ChatApp() {
     streamUserMessageIdRef.current = userMessageId;
     streamEditTargetRef.current = null;
     resumeAttemptedForStreamIdRef.current = null;
+    setOwnedStream({
+      clientStreamId,
+      assistantMessageId,
+      sessionId: chatId,
+    });
     setStreamingState(true);
 
     setChats((prev) =>
@@ -829,6 +1112,11 @@ export default function ChatApp() {
       streamUserMessageIdRef.current = userMessageId;
       streamEditTargetRef.current = userMessageId;
       resumeAttemptedForStreamIdRef.current = null;
+      setOwnedStream({
+        clientStreamId,
+        assistantMessageId,
+        sessionId: chatId,
+      });
       setStreamingState(true);
 
       setChats((prev) =>
@@ -860,7 +1148,7 @@ export default function ChatApp() {
       });
       return true;
     },
-    [connected, isBrowserOffline, setStreamingState]
+    [connected, isBrowserOffline, setOwnedStream, setStreamingState]
   );
 
   function stopResponse() {
