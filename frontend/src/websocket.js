@@ -2,8 +2,18 @@ import { Client } from '@stomp/stompjs';
 import { wsChatUrl } from './apiConfig';
 
 let stompClient = null;
-let activeConnectionId = 0;
-let activeSubscription = null;
+let manualDisconnectInProgress = false;
+let reconnectAttempts = 0;
+let reconnectLimitReached = false;
+
+const RECONNECT_DELAY_MS = 5000;
+const MAX_RECONNECT_ATTEMPTS = 12;
+const HEARTBEAT_INTERVAL_MS = 20000;
+
+function resetReconnectGuards() {
+  reconnectAttempts = 0;
+  reconnectLimitReached = false;
+}
 
 export function connectWebSocket({ accessToken, onMessage, onConnect, onError }) {
   if (!accessToken) {
@@ -12,13 +22,17 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
   }
 
   disconnectWebSocket();
+  manualDisconnectInProgress = false;
+  resetReconnectGuards();
 
   const connectionId = ++activeConnectionId;
   let connectAttempt = 0;
   const client = new Client({
     brokerURL: wsChatUrl(),
 
-    reconnectDelay: 5000,
+    reconnectDelay: RECONNECT_DELAY_MS,
+    heartbeatIncoming: HEARTBEAT_INTERVAL_MS,
+    heartbeatOutgoing: HEARTBEAT_INTERVAL_MS,
 
     connectHeaders: {
       Authorization: `Bearer ${accessToken}`,
@@ -32,11 +46,8 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
     },
 
     onConnect: (frame) => {
-      if (client !== stompClient) {
-        console.debug('[WS] Ignoring stale onConnect callback', { connectionId });
-        return;
-      }
-      console.info('[WS] Connected', { connectionId, frame });
+      console.log('[WS] Connected. Frame:', frame);
+      resetReconnectGuards();
 
       if (activeSubscription) {
         activeSubscription.unsubscribe();
@@ -109,10 +120,46 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
     },
   });
 
-  stompClient = client;
-  console.info('[WS] Activating STOMP client', { connectionId });
-  client.activate();
-  return connectionId;
+  // onWebSocketClose: (event) => {
+  //   console.warn('[WS] WebSocket closed:', event);
+  
+  //   if (onError) {
+  //     onError();
+  //   }
+  // },
+  onWebSocketClose: (event) => {
+
+    // 1000 = normal close
+    // 1001 = server restart/navigation
+    // 1006 = backend temporarily unavailable
+  
+    if (!manualDisconnectInProgress && !reconnectLimitReached) {
+      reconnectAttempts += 1;
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        reconnectLimitReached = true;
+        if (stompClient) {
+          stompClient.reconnectDelay = 0;
+        }
+        console.error('[WS] Reconnect attempt limit reached; auto-reconnect paused.');
+      }
+    }
+
+    const expected =
+      event.code === 1000 ||
+      event.code === 1001 ||
+      event.code === 1006;
+  
+    if (!expected) {
+      console.warn('[WS] WebSocket closed:', event);
+    }
+  
+    if (onError) {
+      onError();
+    }
+  },
+});
+  console.log('[WS] Activating STOMP client…');
+  stompClient.activate();
 }
 
 const JSON_CT = { 'content-type': 'application/json' };
@@ -145,12 +192,10 @@ export function sendStopSignal() {
 
 export function disconnectWebSocket() {
   if (stompClient) {
-    if (activeSubscription) {
-      activeSubscription.unsubscribe();
-      activeSubscription = null;
-    }
+    manualDisconnectInProgress = true;
     stompClient.deactivate();
     stompClient = null;
     activeConnectionId += 1;
   }
+  resetReconnectGuards();
 }

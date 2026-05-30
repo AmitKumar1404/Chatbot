@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, memo, useCallback } from "react";
 import { Copy, Check } from "lucide-react";
+import StreamingMessageRenderer from "./StreamingMessageRenderer";
 
 const UserBubble = memo(function UserBubble({
   msg,
@@ -108,7 +109,12 @@ const AssistantBubble = memo(function AssistantBubble({
   return (
     <div className="chat-bubble assistant">
       {/* MESSAGE TEXT */}
-      <p className="bubble-text">{msg.content}</p>
+      <StreamingMessageRenderer
+        content={msg.content}
+        className="bubble-text"
+        isStreaming={Boolean(msg.streaming)}
+        enableVisualBuffer={false}
+      />
 
       {/* 📋 COPY BUTTON */}
       {msg.content?.trim() && !msg.streaming && (
