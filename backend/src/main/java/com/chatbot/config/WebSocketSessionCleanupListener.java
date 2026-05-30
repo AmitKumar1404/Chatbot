@@ -12,8 +12,6 @@ import org.springframework.web.socket.messaging.SessionConnectEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
 import java.security.Principal;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class WebSocketSessionCleanupListener {
@@ -23,7 +21,6 @@ public class WebSocketSessionCleanupListener {
 
     private final ActiveStreamRegistry activeStreamRegistry;
     private final SimpUserRegistry simpUserRegistry;
-    private final Map<String, Long> disconnectedUsers = new ConcurrentHashMap<>();
 
     public WebSocketSessionCleanupListener(ActiveStreamRegistry activeStreamRegistry, SimpUserRegistry simpUserRegistry) {
         this.activeStreamRegistry = activeStreamRegistry;
@@ -37,7 +34,7 @@ public class WebSocketSessionCleanupListener {
         if (principal == null) {
             return;
         }
-        disconnectedUsers.remove(principal.getName());
+        activeStreamRegistry.clearDisconnected(principal.getName());
     }
 
     @EventListener
@@ -49,7 +46,7 @@ public class WebSocketSessionCleanupListener {
         }
 
         String principalName = principal.getName();
-        disconnectedUsers.put(principalName, System.currentTimeMillis());
+        activeStreamRegistry.markDisconnected(principalName, System.currentTimeMillis());
 
         // Transient disconnect gets a grace window for reconnect/recovery.
         log.info("WebSocket session disconnected — waiting for reconnect grace period — principal={}, stompSessionId={}",
@@ -59,16 +56,14 @@ public class WebSocketSessionCleanupListener {
     @Scheduled(fixedDelay = 30_000)
     public void cleanupStaleDisconnectedStreams() {
         long now = System.currentTimeMillis();
-        disconnectedUsers.forEach((principalName, disconnectedAt) -> {
-            if (now - disconnectedAt < DISCONNECT_GRACE_PERIOD_MS) {
-                return;
-            }
+        long cutoff = now - DISCONNECT_GRACE_PERIOD_MS;
+        activeStreamRegistry.expiredDisconnectedUsers(cutoff).forEach(principalName -> {
             if (simpUserRegistry.getUser(principalName) != null) {
-                disconnectedUsers.remove(principalName);
+                activeStreamRegistry.clearDisconnected(principalName);
                 return;
             }
             activeStreamRegistry.cancel(principalName, "Disconnected beyond grace period");
-            disconnectedUsers.remove(principalName);
+            activeStreamRegistry.clearDisconnected(principalName);
         });
     }
 }
