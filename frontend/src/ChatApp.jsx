@@ -456,6 +456,39 @@ export default function ChatApp() {
       clearInterval(recoveryPollRef.current);
       recoveryPollRef.current = null;
     }
+    if (recoveryPollAbortRef.current) {
+      recoveryPollAbortRef.current.abort();
+      recoveryPollAbortRef.current = null;
+    }
+  }, []);
+
+  const markDisconnected = useCallback((reason) => {
+    setConnectedState(false);
+    setIsRecovering(false);
+    setStatusText("Disconnected");
+    clearRecoveryPoll();
+    abortRecoveryRequests();
+    console.warn("[Stream] Connection lost", {
+      reason,
+      isStreaming: isStreamingRef.current,
+      activeClientStreamId: activeClientStreamIdRef.current,
+    });
+    if (isStreamingRef.current && activeClientStreamIdRef.current) {
+      console.info("[Stream] Stream paused due to disconnect", {
+        reason,
+        clientStreamId: activeClientStreamIdRef.current,
+      });
+    }
+  }, [abortRecoveryRequests, clearRecoveryPoll, setConnectedState]);
+
+  const startReplayDedup = useCallback((chatId, assistantId) => {
+    const chat = chatsRef.current.find((c) => c.id === chatId);
+    const assistant = chat?.messages?.find(
+      (m) => m.id === assistantId && m.role === "assistant"
+    );
+    const prefix = assistant?.content ?? "";
+    streamReplayPrefixRef.current = prefix.length > 0 ? prefix : null;
+    streamReplayCursorRef.current = 0;
   }, []);
 
   useEffect(() => () => clearRecoveryPoll(), [clearRecoveryPoll]);
@@ -559,7 +592,9 @@ export default function ChatApp() {
   }
 
   const finalizeStream = useCallback(() => {
+    recoveryRunIdRef.current += 1;
     clearRecoveryPoll();
+    abortRecoveryRequests();
     setIsRecovering(false);
     const skipRefetch = stopRef.current;
     const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
@@ -587,6 +622,8 @@ export default function ChatApp() {
     streamUserMessageIdRef.current = null;
     streamEditTargetRef.current = null;
     resumeAttemptedForStreamIdRef.current = null;
+    streamReplayPrefixRef.current = null;
+    streamReplayCursorRef.current = 0;
     stopRef.current = false;
     streamChatIdRef.current = null;
     clearOwnedStream();
@@ -609,8 +646,8 @@ export default function ChatApp() {
   }, [clearOwnedStream, clearRecoveryPoll, setStreamingState, token]);
 
   const syncMessagesFromServer = useCallback(
-    async (chatId, assistantId) => {
-      const rows = await fetchSessionMessages(token, chatId);
+    async (chatId, assistantId, options = {}) => {
+      const rows = await fetchSessionMessages(token, chatId, options);
       const chat = chatsRef.current.find((c) => c.id === chatId);
       const localMessages = chat?.messages ?? [];
       const ownedStream = readStreamOwnership();
@@ -700,41 +737,45 @@ export default function ChatApp() {
       if (!payload?.content?.trim()) return false;
 
       resumeAttemptedForStreamIdRef.current = clientStreamId;
-
-      // Regenerate from scratch on the server; clear local bubble to avoid duplicated text.
-      setChats((prev) =>
-        prev.map((chat) => {
-          if (chat.id !== chatId) return chat;
-          return {
-            ...chat,
-            messages: chat.messages.map((m) =>
-              m.id === assistantId && m.role === "assistant"
-                ? { ...m, content: "", streaming: true }
-                : m
-            ),
-          };
-        })
-      );
+      startReplayDedup(chatId, assistantId);
+      console.info("[Stream] Active stream missing after reconnect, restarting generation", {
+        chatId,
+        assistantId,
+        clientStreamId,
+      });
 
       sendMessage(payload);
       return true;
     },
-    [buildStreamResumePayload]
+    [buildStreamResumePayload, startReplayDedup]
   );
 
-  const recoverInterruptedStream = useCallback(async () => {
+  const recoverInterruptedStream = useCallback(async (connectionId) => {
     if (!token || !isStreamingRef.current || stopRef.current) return;
     if (recoveryInFlightRef.current) return;
     recoveryInFlightRef.current = true;
+    const recoveryRunId = ++recoveryRunIdRef.current;
+    abortRecoveryRequests();
+    const recoveryAbort = new AbortController();
+    recoveryAbortRef.current = recoveryAbort;
 
     setIsRecovering(true);
     setStatusText("Resuming…");
+    console.info("[Stream] Recovery attempt started", {
+      recoveryRunId,
+      connectionId,
+      clientStreamId: activeClientStreamIdRef.current,
+    });
 
     try {
       let assistantId = streamAssistantMessageIdRef.current;
       let clientStreamId = activeClientStreamIdRef.current;
 
-      const active = await fetchActiveStream(token);
+      const active = await fetchActiveStream(token, {
+        signal: recoveryAbort.signal,
+      });
+      if (latestWsConnectionIdRef.current !== connectionId) return;
+
       if (active) {
         clientStreamId = active.clientStreamId;
         assistantId = active.assistantMessageId;
@@ -750,20 +791,52 @@ export default function ChatApp() {
 
       const alreadyComplete = await syncMessagesFromServer(
         targetChatId,
-        assistantId
+        assistantId,
+        { signal: recoveryAbort.signal }
       );
+      if (latestWsConnectionIdRef.current !== connectionId) return;
+
       if (alreadyComplete) {
+        console.info("[Stream] Recovery found stream already completed", {
+          recoveryRunId,
+          clientStreamId,
+        });
         finalizeStream();
         return;
       }
 
       if (!active) {
-        restartInterruptedGeneration(targetChatId, assistantId, clientStreamId);
+        const restarted = restartInterruptedGeneration(
+          targetChatId,
+          assistantId,
+          clientStreamId
+        );
+        if (restarted) {
+          console.info("[Stream] Recovery restart dispatched", {
+            recoveryRunId,
+            clientStreamId,
+          });
+        }
+      } else {
+        streamReplayPrefixRef.current = null;
+        streamReplayCursorRef.current = 0;
+        console.info("[Stream] Recovery bound to backend active stream", {
+          recoveryRunId,
+          clientStreamId,
+        });
       }
 
       clearRecoveryPoll();
       recoveryPollRef.current = setInterval(async () => {
+        if (recoveryRunIdRef.current !== recoveryRunId) {
+          clearRecoveryPoll();
+          return;
+        }
         if (!isStreamingRef.current || stopRef.current) {
+          clearRecoveryPoll();
+          return;
+        }
+        if (latestWsConnectionIdRef.current !== connectionId) {
           clearRecoveryPoll();
           return;
         }
@@ -771,25 +844,43 @@ export default function ChatApp() {
           const tid = streamChatIdRef.current ?? activeChatIdRef.current;
           const aid = streamAssistantMessageIdRef.current;
           if (tid == null || !aid) return;
-          const complete = await syncMessagesFromServer(tid, aid);
+          if (recoveryPollAbortRef.current) {
+            recoveryPollAbortRef.current.abort();
+          }
+          const pollAbort = new AbortController();
+          recoveryPollAbortRef.current = pollAbort;
+          const complete = await syncMessagesFromServer(tid, aid, {
+            signal: pollAbort.signal,
+          });
           if (complete) {
             clearRecoveryPoll();
             finalizeStream();
           }
         } catch (e) {
-          console.error(e);
+          if (e?.name === "AbortError") return;
+          console.error("[Stream] Recovery polling failed", e);
         }
       }, 1500);
     } catch (e) {
-      console.error(e);
+      if (e?.name === "AbortError") {
+        console.debug("[Stream] Recovery request aborted");
+        return;
+      }
+      console.error("[Stream] Recovery failed", e);
     } finally {
       recoveryInFlightRef.current = false;
-      if (isStreamingRef.current) {
+      if (recoveryAbortRef.current === recoveryAbort) {
+        recoveryAbortRef.current = null;
+      }
+      if (
+        recoveryRunIdRef.current === recoveryRunId &&
+        latestWsConnectionIdRef.current === connectionId
+      ) {
         setIsRecovering(false);
-        setStatusText("Connected");
       }
     }
   }, [
+    abortRecoveryRequests,
     clearRecoveryPoll,
     finalizeStream,
     restartInterruptedGeneration,
@@ -800,6 +891,7 @@ export default function ChatApp() {
   const appendAssistantChunk = useCallback((chunk) => {
     if (stopRef.current) return;
     if (!isStreamingRef.current) return;
+    if (!connectedRef.current) return;
 
     const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
     const assistantId = streamAssistantMessageIdRef.current;
@@ -890,7 +982,13 @@ export default function ChatApp() {
   ]);
 
   const handleStreamBody = useCallback(
-    (raw) => {
+    (raw, wsMeta) => {
+      if (
+        wsMeta?.connectionId != null &&
+        wsMeta.connectionId !== latestWsConnectionIdRef.current
+      ) {
+        return;
+      }
       if (raw == null || raw === "") return;
 
       let event;
@@ -934,19 +1032,28 @@ export default function ChatApp() {
   useEffect(() => {
     if (!token) {
       disconnectWebSocket();
-      setConnected(false);
+      latestWsConnectionIdRef.current = null;
+      setConnectedState(false);
       setStatusText("Not signed in");
+      clearRecoveryPoll();
+      abortRecoveryRequests();
       return;
     }
 
-    connectWebSocket({
+    setConnectedState(false);
+    setStatusText("Connecting…");
+    const connectionId = connectWebSocket({
       accessToken: token,
       onMessage: handleStreamBody,
       onConnect: () => {
         setConnected(true);
         activeStreamBootstrapAttemptedRef.current = false;
         if (isStreamingRef.current && activeClientStreamIdRef.current) {
-          recoverInterruptedStream();
+          console.info("[Stream] Reconnected, attempting stream recovery", {
+            connectionId: meta?.connectionId,
+            clientStreamId: activeClientStreamIdRef.current,
+          });
+          recoverInterruptedStream(meta?.connectionId);
         } else {
           setStatusText("Connected");
         }
@@ -959,11 +1066,27 @@ export default function ChatApp() {
         } else {
           setStatusText("Disconnected");
         }
+        markDisconnected(meta?.reason ?? "unknown");
       },
     });
+    latestWsConnectionIdRef.current = connectionId;
+    console.info("[WS] Connection attempt started", { connectionId });
 
-    return () => disconnectWebSocket();
-  }, [handleStreamBody, recoverInterruptedStream, token]);
+    return () => {
+      latestWsConnectionIdRef.current = null;
+      clearRecoveryPoll();
+      abortRecoveryRequests();
+      disconnectWebSocket();
+    };
+  }, [
+    abortRecoveryRequests,
+    clearRecoveryPoll,
+    handleStreamBody,
+    markDisconnected,
+    recoverInterruptedStream,
+    setConnectedState,
+    token,
+  ]);
 
   useEffect(() => {
     if (!token) return undefined;
