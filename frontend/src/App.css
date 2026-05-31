@@ -760,6 +760,29 @@ body {
   color: #9ca3af;
 }
 
+.chat-search-snippet-part {
+  color: inherit;
+}
+
+.chat-search-highlight {
+  background: #fde047;
+  color: #111827;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+.message-keyword-highlight {
+  background: rgba(250, 204, 21, 0.6);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
+.search-target-bubble .bubble-text {
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.35);
+}
+
 .chat-section {
   flex: 1;
   display: flex;
@@ -1500,6 +1523,45 @@ body {
     border-radius: 16px;
   }
 }
+/* =========================
+   Collapsed Search Modal
+========================= */
+
+.collapsed-search-modal-overlay {
+  position: fixed;
+  inset: 0;
+  border: none;
+  margin: 0;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+  backdrop-filter: blur(6px);
+}
+
+.collapsed-search-modal {
+  width: min(620px, 92vw);
+  max-height: min(72vh, 620px);
+  overflow: hidden;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.4),
+    0 8px 18px rgba(0, 0, 0, 0.25);
+  animation: logoutModalIn 0.2s ease;
+}
+
+.collapsed-search-results-list {
+  max-height: min(52vh, 430px);
+}
+
 /* =========================
    Logout Modal
 ========================= */

@@ -48,6 +48,10 @@ function getInitialIsDesktopViewport() {
   return window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function buildPriorDtos(messages) {
   return messages
     .filter((m) => m && (m.role === "user" || m.role === "assistant"))
@@ -67,6 +71,7 @@ function mapDbMessageToUi(m) {
       responseTo: null,
       editing: false,
       streaming: false,
+      sourceMessageId: m.id,
     },
     {
       id: aid,
@@ -75,6 +80,7 @@ function mapDbMessageToUi(m) {
       responseTo: uid,
       editing: false,
       streaming: assistantStreaming,
+      sourceMessageId: m.id,
     },
   ];
 }
@@ -110,11 +116,14 @@ export default function ChatApp() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
+  const [showCollapsedSearchDialog, setShowCollapsedSearchDialog] =
+    useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchedQuery, setSearchedQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [openedSearchMatch, setOpenedSearchMatch] = useState(null);
 
   const [isDesktopViewport, setIsDesktopViewport] = useState(
     getInitialIsDesktopViewport
@@ -204,8 +213,25 @@ export default function ChatApp() {
   }, [isMobileDrawerOpen]);
 
   useEffect(() => {
+    if (!showCollapsedSearchDialog) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setShowCollapsedSearchDialog(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showCollapsedSearchDialog]);
+
+  useEffect(() => {
     if (isSidebarCollapsed) {
       setShowProfileMenu(false);
+    }
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    if (!isSidebarCollapsed) {
+      setShowCollapsedSearchDialog(false);
     }
   }, [isSidebarCollapsed]);
 
@@ -306,8 +332,19 @@ export default function ChatApp() {
     hasSearched &&
     searchQuery.trim() === searchedQuery;
 
+  useEffect(() => {
+    if (!openedSearchMatch) return;
+    if (activeChatId == null || activeChatId !== openedSearchMatch.sessionId) {
+      setOpenedSearchMatch(null);
+    }
+  }, [activeChatId, openedSearchMatch]);
+
   const selectChat = useCallback(
-    async (chatId) => {
+    async (chatId, options = {}) => {
+      const { preserveSearchMatch = false } = options;
+      if (!preserveSearchMatch) {
+        setOpenedSearchMatch(null);
+      }
       setActiveChatId(chatId);
       if (!isDesktopViewport) {
         setIsMobileSidebarOpen(false);
@@ -331,6 +368,7 @@ export default function ChatApp() {
   );
 
   const handleSearch = useCallback(async () => {
+    setOpenedSearchMatch(null);
     const trimmed = searchQuery.trim();
     if (!trimmed || !token) {
       setHasSearched(false);
@@ -359,6 +397,7 @@ export default function ChatApp() {
     setSearchResults([]);
     setHasSearched(false);
     setSearchedQuery("");
+    setOpenedSearchMatch(null);
   }
   function handleSearchQueryChange(value) {
     setSearchQuery(value);
@@ -374,9 +413,45 @@ export default function ChatApp() {
     }
   }
 
-  function handleSearchResultClick(sessionId) {
+  async function handleSearchResultClick(result) {
+    const keyword = (searchedQuery || searchQuery).trim();
+    setOpenedSearchMatch({
+      sessionId: result.sessionId,
+      messageId: result.messageId ?? null,
+      keyword,
+    });
     setOpenChatMenuId(null);
-    selectChat(sessionId);
+    await selectChat(result.sessionId, { preserveSearchMatch: true });
+    setShowCollapsedSearchDialog(false);
+  }
+
+  function getSearchResultSnippet(result) {
+    const snippet = (result?.content ?? "").trim();
+    if (snippet) return snippet;
+    if (result?.matchType === "TITLE") return "Title match";
+    return result?.matchType ?? "Match";
+  }
+
+  function renderSearchSnippetWithHighlight(snippet) {
+    const keyword = searchQuery.trim();
+    if (!keyword || !snippet) return snippet;
+
+    const pattern = new RegExp(`(${escapeRegExp(keyword)})`, "ig");
+    return snippet.split(pattern).map((part, index) => {
+      if (part.toLowerCase() === keyword.toLowerCase()) {
+        return (
+          <mark key={`match-${index}`} className="chat-search-highlight">
+            {part}
+          </mark>
+        );
+      }
+
+      return (
+        <span key={`text-${index}`} className="chat-search-snippet-part">
+          {part}
+        </span>
+      );
+    });
   }
 
   const finalizeStream = useCallback(() => {
@@ -925,7 +1000,7 @@ export default function ChatApp() {
   }
 
   function handleCollapsedSidebarSearchClick() {
-    setIsDesktopSidebarCollapsed(false);
+    setShowCollapsedSearchDialog(true);
     requestAnimationFrame(() => {
       const input = document.querySelector(".sidebar-search-input");
       if (input instanceof HTMLInputElement) {
@@ -1190,13 +1265,15 @@ export default function ChatApp() {
                   className={`chat-item chat-search-item ${
                     result.sessionId === activeChatId ? "active" : ""
                   }`}
-                  onClick={() => handleSearchResultClick(result.sessionId)}
+                  onClick={() => handleSearchResultClick(result)}
                 >
                   <span className="chat-search-title">
                     {result.sessionTitle || "New chat"}
                   </span>
                   <span className="chat-search-snippet">
-                    {result.content || result.matchType}
+                    {renderSearchSnippetWithHighlight(
+                      getSearchResultSnippet(result)
+                    )}
                   </span>
                 </button>
               ))
@@ -1304,6 +1381,64 @@ export default function ChatApp() {
             </div>
           </div>
         )}
+        {showCollapsedSearchDialog && (
+          <div
+            className="collapsed-search-modal-overlay"
+            onClick={() => setShowCollapsedSearchDialog(false)}
+          >
+            <div
+              className="collapsed-search-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Search chats"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <SearchBar
+                value={searchQuery}
+                onChange={handleSearchQueryChange}
+                onSearch={handleSearch}
+                onClear={handleClearSearch}
+                isLoading={isSearching}
+              />
+              {isSearching && (
+                <div className="sidebar-search-status">Searching...</div>
+              )}
+              {isSearchView && (
+                <div className="chat-list search-results-list collapsed-search-results-list">
+                  {searchResults.length === 0 ? (
+                    <p className="sidebar-search-status">
+                      No matching chats or messages found.
+                    </p>
+                  ) : (
+                    searchResults.map((result, index) => (
+                      <button
+                        key={`${result.sessionId}-${
+                          result.messageId ?? "session"
+                        }-${index}`}
+                        type="button"
+                        className={`chat-item chat-search-item ${
+                          result.sessionId === activeChatId ? "active" : ""
+                        }`}
+                        onClick={() =>
+                          handleSearchResultClick(result)
+                        }
+                      >
+                        <span className="chat-search-title">
+                          {result.sessionTitle || "New chat"}
+                        </span>
+                        <span className="chat-search-snippet">
+                          {renderSearchSnippetWithHighlight(
+                            getSearchResultSnippet(result)
+                          )}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {isBrowserOffline && (
           <div
             className="network-offline-banner"
@@ -1328,6 +1463,11 @@ export default function ChatApp() {
           messages={activeChat?.messages || []}
           isStreaming={isStreaming}
           onEditSave={handleEditSave}
+          searchMatch={
+            openedSearchMatch?.sessionId === activeChatId
+              ? openedSearchMatch
+              : null
+          }
         />
 
         <InputBox
