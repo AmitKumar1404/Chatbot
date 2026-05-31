@@ -28,7 +28,7 @@ export function AuthProvider({ children }) {
   const [bootstrapping, setBootstrapping] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = sessionStorage.getItem(STORAGE_KEY);
     if (!stored) {
       setBootstrapping(false);
       return;
@@ -42,7 +42,7 @@ export function AuthProvider({ children }) {
           headers: { Authorization: `Bearer ${stored}` },
         });
         if (!res.ok) {
-          localStorage.removeItem(STORAGE_KEY);
+          sessionStorage.removeItem(STORAGE_KEY);
           if (!cancelled) {
             setToken(null);
             setUsername(null);
@@ -55,7 +55,7 @@ export function AuthProvider({ children }) {
           setUsername(body.username);
         }
       } catch {
-        localStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(STORAGE_KEY);
         if (!cancelled) {
           setToken(null);
           setUsername(null);
@@ -84,7 +84,7 @@ export function AuthProvider({ children }) {
     if (!body?.token) {
       throw new Error("Invalid response from server");
     }
-    localStorage.setItem(STORAGE_KEY, body.token);
+    sessionStorage.setItem(STORAGE_KEY, body.token);
     setToken(body.token);
     setUsername(body.username ?? uname);
   }, []);
@@ -103,7 +103,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
     setToken(null);
     setUsername(null);
   }, []);
