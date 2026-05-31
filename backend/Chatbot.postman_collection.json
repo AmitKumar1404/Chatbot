@@ -12,6 +12,10 @@
 		{
 			"key": "sessionId",
 			"value": "1"
+		},
+		{
+			"key": "token",
+			"value": ""
 		}
 	],
 	"item": [
@@ -93,6 +97,35 @@
 						},
 						"description": "POST /auth/login — LoginRequest body (served at /api/v1/auth/login)"
 					}
+				},
+				{
+					"name": "Me",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/auth/me",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"me"
+							],
+							"query": []
+						},
+						"description": "GET /auth/me (served at /api/v1/auth/me)"
+					}
 				}
 			]
 		},
@@ -107,6 +140,11 @@
 							{
 								"key": "Content-Type",
 								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
 								"type": "text"
 							}
 						],
@@ -142,8 +180,8 @@
 						"method": "GET",
 						"header": [
 							{
-								"key": "Content-Type",
-								"value": "application/json",
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
 								"type": "text"
 							}
 						],
@@ -166,13 +204,42 @@
 					}
 				},
 				{
+					"name": "Create session",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/chat/sessions",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"chat",
+								"sessions"
+							],
+							"query": []
+						},
+						"description": "POST /chat/sessions (served at /api/v1/chat/sessions)"
+					}
+				},
+				{
 					"name": "Get messages for session",
 					"request": {
 						"method": "GET",
 						"header": [
 							{
-								"key": "Content-Type",
-								"value": "application/json",
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
 								"type": "text"
 							}
 						],
@@ -191,7 +258,18 @@
 								":sessionId",
 								"messages"
 							],
-							"query": [],
+							"query": [
+								{
+									"key": "page",
+									"value": "",
+									"description": "Optional: page index (>= 0)"
+								},
+								{
+									"key": "size",
+									"value": "",
+									"description": "Optional: page size (> 0)"
+								}
+							],
 							"variable": [
 								{
 									"key": "sessionId",
@@ -201,6 +279,125 @@
 							]
 						},
 						"description": "GET /chat/sessions/{sessionId}/messages (served at /api/v1/chat/sessions/{sessionId}/messages)"
+					}
+				},
+				{
+					"name": "Delete session",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/chat/sessions/:sessionId",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"chat",
+								"sessions",
+								":sessionId"
+							],
+							"query": [],
+							"variable": [
+								{
+									"key": "sessionId",
+									"value": "1",
+									"description": "Path variable — Long sessionId"
+								}
+							]
+						},
+						"description": "DELETE /chat/sessions/{sessionId} (served at /api/v1/chat/sessions/{sessionId})"
+					}
+				},
+				{
+					"name": "Update session title",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"New chat title\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/chat/sessions/:sessionId/title",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"chat",
+								"sessions",
+								":sessionId",
+								"title"
+							],
+							"query": [],
+							"variable": [
+								{
+									"key": "sessionId",
+									"value": "1",
+									"description": "Path variable — Long sessionId"
+								}
+							]
+						},
+						"description": "PATCH /chat/sessions/{sessionId}/title (served at /api/v1/chat/sessions/{sessionId}/title)"
+					}
+				},
+				{
+					"name": "Get active stream",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/chat/stream/active",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"chat",
+								"stream",
+								"active"
+							],
+							"query": []
+						},
+						"description": "GET /chat/stream/active (served at /api/v1/chat/stream/active)"
 					}
 				}
 			]
@@ -214,8 +411,8 @@
 						"method": "GET",
 						"header": [
 							{
-								"key": "Content-Type",
-								"value": "application/json",
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
 								"type": "text"
 							}
 						],
