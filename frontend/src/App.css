@@ -708,6 +708,10 @@ body {
   justify-content: center;
 }
 
+.sidebar-search-tooltip-wrapper {
+  margin-top: 8px;
+}
+
 .sidebar-tooltip {
   position: absolute;
   left: calc(100% + 12px);
