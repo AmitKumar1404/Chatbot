@@ -1,6 +1,12 @@
 spring:
   profiles:
     active: prod
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT_MS:1000ms}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT_MS:1000ms}
 
 server:
   port: 9998
