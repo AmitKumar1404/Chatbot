@@ -1,6 +1,12 @@
 spring:
   profiles:
     active: prod
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT_MS:1000ms}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT_MS:1000ms}
 
 server:
   port: 9998
@@ -11,6 +17,10 @@ app:
   jwt:
     secret: your-256-bit-secret-key-change-this-in-production-must-be-long
     expiration: 86400000
+  redis:
+    stream:
+      active-ttl-seconds: ${REDIS_STREAM_ACTIVE_TTL_SECONDS:1800}
+      disconnected-ttl-seconds: ${REDIS_STREAM_DISCONNECTED_TTL_SECONDS:3600}
   ai:
     ollama:
       base-url: http://localhost:11434
