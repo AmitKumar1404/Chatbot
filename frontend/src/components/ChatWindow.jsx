@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, memo, useCallback } from "react";
 import { Copy, Check } from "lucide-react";
+import StreamingMessageRenderer from "./StreamingMessageRenderer";
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
