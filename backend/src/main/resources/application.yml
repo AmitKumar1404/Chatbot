@@ -17,12 +17,17 @@ app:
   jwt:
     secret: your-256-bit-secret-key-change-this-in-production-must-be-long
     expiration: 86400000
-  redis:
-    stream:
-      active-ttl-seconds: ${REDIS_STREAM_ACTIVE_TTL_SECONDS:1800}
-      disconnected-ttl-seconds: ${REDIS_STREAM_DISCONNECTED_TTL_SECONDS:3600}
+  openapi:
+    title: Chatbot Backend API
+    description: REST APIs for authentication, chat sessions, messaging, and search.
+    version: v1
   ai:
     ollama:
       base-url: http://localhost:11434
       model: phi3
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  packages-to-scan: com.chatbot.controller
