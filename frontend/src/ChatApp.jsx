@@ -25,6 +25,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Menu,
+  Search,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -923,6 +924,16 @@ export default function ChatApp() {
     setIsMobileSidebarOpen((prev) => !prev);
   }
 
+  function handleCollapsedSidebarSearchClick() {
+    setIsDesktopSidebarCollapsed(false);
+    requestAnimationFrame(() => {
+      const input = document.querySelector(".sidebar-search-input");
+      if (input instanceof HTMLInputElement) {
+        input.focus();
+      }
+    });
+  }
+
   const sidebarToggleAriaLabel = isDesktopViewport
     ? isSidebarCollapsed
       ? "Expand sidebar"
@@ -1051,6 +1062,19 @@ export default function ChatApp() {
             <div className="sidebar-tooltip">New Chat</div>
           )}
         </div>
+
+        {isSidebarCollapsed && (
+          <div className="new-chat-tooltip-wrapper sidebar-search-tooltip-wrapper">
+            <button
+              className="new-chat-btn icon-only"
+              onClick={handleCollapsedSidebarSearchClick}
+              aria-label="Search"
+            >
+              <Search size={20} />
+            </button>
+            <div className="sidebar-tooltip">Search</div>
+          </div>
+        )}
 
         {!isSidebarCollapsed && (
           <>
