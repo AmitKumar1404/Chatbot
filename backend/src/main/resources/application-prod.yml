@@ -27,5 +27,5 @@ app:
   ai:
     ollama:
       base-url: http://localhost:11434
-      model: phi3
+      model: ${OLLAMA_MODEL:qwen2.5:7b}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
