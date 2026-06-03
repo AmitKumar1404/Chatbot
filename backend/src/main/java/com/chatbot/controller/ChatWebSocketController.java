@@ -16,6 +16,7 @@ import org.springframework.stereotype.Controller;
 import reactor.core.publisher.SignalType;
 
 import java.security.Principal;
+import java.util.concurrent.CancellationException;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -189,6 +190,9 @@ public class ChatWebSocketController {
                 () ->
                 streamingService.streamChat(composedPrompt)
                         .doOnNext(chunk -> {
+                            if (!activeStreamRegistry.isCurrentStream(userName, streamId)) {
+                                throw new CancellationException("Stream ownership moved");
+                            }
                             log.debug("Sending chunk to principal={} clientStreamId={} chunk='{}'",
                                     userName, outboundClientStreamId, chunk);
                             if (chunk != null && chunk.startsWith(ERROR_PREFIX)) {

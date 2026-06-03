@@ -296,6 +296,62 @@ body {
   word-break: break-word;
 }
 
+.bubble-markdown p {
+  margin: 0;
+}
+
+.bubble-markdown p + p {
+  margin-top: 8px;
+}
+
+.bubble-markdown h1,
+.bubble-markdown h2,
+.bubble-markdown h3,
+.bubble-markdown h4,
+.bubble-markdown h5,
+.bubble-markdown h6 {
+  margin: 0 0 8px;
+  line-height: 1.35;
+  font-size: 1em;
+}
+
+.bubble-markdown ul,
+.bubble-markdown ol {
+  margin: 8px 0 8px 18px;
+  padding: 0;
+}
+
+.bubble-markdown li + li {
+  margin-top: 4px;
+}
+
+.bubble-markdown pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 10px;
+  overflow-x: auto;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.chat-bubble.user .bubble-markdown pre {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.bubble-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.bubble-markdown blockquote {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 3px solid rgba(107, 114, 128, 0.5);
+}
+
+.bubble-markdown a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .chat-bubble.user .bubble-text {
   background: #1a1a2e;
   color: #fff;

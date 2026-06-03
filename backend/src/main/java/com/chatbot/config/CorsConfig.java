@@ -20,7 +20,7 @@ public class CorsConfig {
         config.addAllowedMethod("OPTIONS");
         config.addAllowedMethod("PATCH");
         config.addAllowedHeader("*");
-        config.setAllowCredentials(false);
+        config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
