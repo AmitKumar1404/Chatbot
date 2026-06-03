@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, memo, useCallback } from "react";
 import { Copy, Check } from "lucide-react";
-import StreamingMessageRenderer from "./StreamingMessageRenderer";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -104,6 +105,7 @@ const AssistantBubble = memo(function AssistantBubble({
   onCopy,
   copiedId,
   renderedContent,
+  shouldRenderPlainText,
   isSearchMatch,
 }) {
   if (msg.streaming && !(msg.content ?? "").trim()) {
@@ -124,8 +126,17 @@ const AssistantBubble = memo(function AssistantBubble({
         isSearchMatch ? "search-target-bubble" : ""
       }`}
     >
-      {/* MESSAGE TEXT */}
-      <p className="bubble-text">{renderedContent ?? msg.content}</p>
+      {shouldRenderPlainText ? (
+        // Keep current text+mark rendering for active search target.
+        <p className="bubble-text">{renderedContent ?? msg.content}</p>
+      ) : (
+        // Render assistant content as Markdown (GFM), while preserving raw text for copy.
+        <div className="bubble-text bubble-markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {msg.content ?? ""}
+          </ReactMarkdown>
+        </div>
+      )}
 
       {/* 📋 COPY BUTTON */}
       {msg.content?.trim() && !msg.streaming && (
@@ -297,6 +308,8 @@ export default function ChatWindow({
           msg.sourceMessageId === searchMatch.messageId &&
           keyword.length > 0 &&
           (msg.content ?? "").toLowerCase().includes(keyword);
+        const shouldRenderAssistantAsPlainText =
+          msg.role === "assistant" && isSearchMatch;
         const renderedContent = renderContentWithSearchHighlight(msg);
 
         if (msg.role === "user") {
@@ -327,6 +340,7 @@ export default function ChatWindow({
               onCopy={handleCopy} // ✅ ADDED
               copiedId={copiedId}
               renderedContent={renderedContent}
+              shouldRenderPlainText={shouldRenderAssistantAsPlainText}
               isSearchMatch={isSearchMatch}
             />
           </div>
