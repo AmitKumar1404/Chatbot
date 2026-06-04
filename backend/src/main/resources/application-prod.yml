@@ -7,7 +7,7 @@ spring:
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     show-sql: false
   data:
     redis:
@@ -15,6 +15,10 @@ spring:
       port: ${REDIS_PORT:6379}
       timeout: ${REDIS_TIMEOUT_MS:1000ms}
       connect-timeout: ${REDIS_CONNECT_TIMEOUT_MS:1000ms}
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
 
 server:
   port: 9999
