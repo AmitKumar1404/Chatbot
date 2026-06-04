@@ -12,6 +12,7 @@ This repository contains two applications:
 - `frontend`: React + Vite web client
 
 The platform provides authenticated conversation workflows with:
+
 - Register/login
 - Session-based chat history
 - Search across conversations
@@ -40,21 +41,21 @@ The platform provides authenticated conversation workflows with:
 
 ## 3. Technology Stack
 
-| Layer | Technology | Version/Notes |
-|---|---|---|
-| Backend Runtime | Java | 17 |
-| Backend Framework | Spring Boot | 3.2.5 |
-| Web/API | Spring MVC | `spring-boot-starter-web` |
-| Security | Spring Security + JWT | JJWT `0.12.3` |
-| Persistence | Spring Data JPA | PostgreSQL runtime |
-| Realtime | Spring WebSocket + STOMP | Simple in-memory broker |
-| HTTP Client | WebClient (WebFlux) | Used for Ollama |
-| API Docs | Springdoc OpenAPI | `2.5.0` |
-| Frontend Framework | React | `19.2.5` |
-| Frontend Build | Vite | `8.0.10` |
-| Routing | React Router | `7.6.1` |
-| Realtime Client | `@stomp/stompjs` | `7.3.0` |
-| UI Icons | `lucide-react` | `1.14.0` |
+| Layer              | Technology               | Version/Notes             |
+| ------------------ | ------------------------ | ------------------------- |
+| Backend Runtime    | Java                     | 17                        |
+| Backend Framework  | Spring Boot              | 3.2.5                     |
+| Web/API            | Spring MVC               | `spring-boot-starter-web` |
+| Security           | Spring Security + JWT    | JJWT `0.12.3`             |
+| Persistence        | Spring Data JPA          | PostgreSQL runtime        |
+| Realtime           | Spring WebSocket + STOMP | Simple in-memory broker   |
+| HTTP Client        | WebClient (WebFlux)      | Used for Ollama           |
+| API Docs           | Springdoc OpenAPI        | `2.5.0`                   |
+| Frontend Framework | React                    | `19.2.5`                  |
+| Frontend Build     | Vite                     | `8.0.10`                  |
+| Routing            | React Router             | `7.6.1`                   |
+| Realtime Client    | `@stomp/stompjs`         | `7.3.0`                   |
+| UI Icons           | `lucide-react`           | `1.14.0`                  |
 
 ---
 
@@ -139,18 +140,18 @@ flowchart TD
 
 ### 7.1 Package Responsibilities
 
-| Package | Responsibility |
-|---|---|
-| `controller` | REST and STOMP entry points |
-| `service` | Contracts + utility services (`ActiveStreamRegistry`, `ChatPromptComposer`) |
-| `impl` | Core business logic |
-| `repository` | DB access via JPA |
-| `model` | Entity mapping |
-| `security` | HTTP auth/authorization with JWT |
-| `config` | WebSocket, CORS, OpenAPI, WebClient, password encoder |
-| `dto` | Contracts for API + streaming payloads |
-| `exception` | Global exception mapping |
-| `client` | Ollama sync client |
+| Package      | Responsibility                                                              |
+| ------------ | --------------------------------------------------------------------------- |
+| `controller` | REST and STOMP entry points                                                 |
+| `service`    | Contracts + utility services (`ActiveStreamRegistry`, `ChatPromptComposer`) |
+| `impl`       | Core business logic                                                         |
+| `repository` | DB access via JPA                                                           |
+| `model`      | Entity mapping                                                              |
+| `security`   | HTTP auth/authorization with JWT                                            |
+| `config`     | WebSocket, CORS, OpenAPI, WebClient, password encoder                       |
+| `dto`        | Contracts for API + streaming payloads                                      |
+| `exception`  | Global exception mapping                                                    |
+| `client`     | Ollama sync client                                                          |
 
 ### 7.2 Major Backend Components
 
@@ -167,16 +168,16 @@ flowchart TD
 
 ### 8.1 Module Breakdown
 
-| Module | File(s) | Purpose |
-|---|---|---|
-| Auth provider | `src/context/AuthContext.jsx` | Token storage/bootstrap/login/register/logout |
-| Route protection | `src/App.jsx` | Redirects unauthenticated users |
-| Chat orchestrator | `src/ChatApp.jsx` | Stream/session/search/recovery state and orchestration |
-| REST API wrapper | `src/chatApi.js` | Backend endpoint calls |
-| URL resolver | `src/apiConfig.js` | REST base + derived WS URL |
-| STOMP client | `src/websocket.js` | Connect/subscribe/publish/disconnect |
-| UI components | `src/components/*` | Message rendering and input/search controls |
-| Connectivity hook | `src/hooks/useNetworkStatus.js` | Browser online/offline state |
+| Module            | File(s)                         | Purpose                                                |
+| ----------------- | ------------------------------- | ------------------------------------------------------ |
+| Auth provider     | `src/context/AuthContext.jsx`   | Token storage/bootstrap/login/register/logout          |
+| Route protection  | `src/App.jsx`                   | Redirects unauthenticated users                        |
+| Chat orchestrator | `src/ChatApp.jsx`               | Stream/session/search/recovery state and orchestration |
+| REST API wrapper  | `src/chatApi.js`                | Backend endpoint calls                                 |
+| URL resolver      | `src/apiConfig.js`              | REST base + derived WS URL                             |
+| STOMP client      | `src/websocket.js`              | Connect/subscribe/publish/disconnect                   |
+| UI components     | `src/components/*`              | Message rendering and input/search controls            |
+| Connectivity hook | `src/hooks/useNetworkStatus.js` | Browser online/offline state                           |
 
 ### 8.2 Session Management in Frontend
 
@@ -193,11 +194,11 @@ Configured DB for active profile (`prod`) is PostgreSQL.
 
 ### Tables and Fields
 
-| Table | Fields |
-|---|---|
-| `users` | `id`, `username`, `password` |
-| `chat_sessions` | `id`, `user_id`, `title`, `created_at` |
-| `messages` | `id`, `session_id`, `user_message`, `ai_response`, `timestamp`, `user_bubble_client_id`, `assistant_bubble_client_id`, `generation_complete` |
+| Table           | Fields                                                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`         | `id`, `username`, `password`                                                                                                                 |
+| `chat_sessions` | `id`, `user_id`, `title`, `created_at`                                                                                                       |
+| `messages`      | `id`, `session_id`, `user_message`, `ai_response`, `timestamp`, `user_bubble_client_id`, `assistant_bubble_client_id`, `generation_complete` |
 
 ---
 
@@ -272,13 +273,13 @@ sequenceDiagram
 
 ### Route Access Policy
 
-| Route Pattern | Access |
-|---|---|
-| `/auth/login`, `/auth/register` | Public |
-| `/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html` | Public |
-| `/h2-console/**`, `/ws-chat/**` | Public |
-| `/chat/**`, `/search/**` | Authenticated |
-| all others | Authenticated |
+| Route Pattern                                           | Access        |
+| ------------------------------------------------------- | ------------- |
+| `/auth/login`, `/auth/register`                         | Public        |
+| `/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html` | Public        |
+| `/h2-console/**`, `/ws-chat/**`                         | Public        |
+| `/chat/**`, `/search/**`                                | Authenticated |
+| all others                                              | Authenticated |
 
 ### Authorization Sequence
 
@@ -325,32 +326,33 @@ Base path: `/api/v1`
 
 ### 14.1 REST Endpoints
 
-| Method | Endpoint | Request DTO | Response DTO | Auth |
-|---|---|---|---|---|
-| POST | `/auth/register` | `RegisterRequest` | `AuthResponse` | Public |
-| POST | `/auth/login` | `LoginRequest` | `AuthResponse` | Public |
-| GET | `/auth/me` | None | `AuthResponse` | Required |
-| POST | `/chat` | `ChatRequest` | `ChatResponse` | Required |
-| GET | `/chat/sessions` | None | `List<ChatSession>` | Required |
-| POST | `/chat/sessions` | None | `ChatSession` | Required |
-| DELETE | `/chat/sessions/{sessionId}` | None | Empty | Required |
-| PATCH | `/chat/sessions/{sessionId}/title` | `UpdateSessionTitleRequest` | `ChatSession` | Required |
-| GET | `/chat/sessions/{sessionId}/messages` | Query params optional | `List<Message>` | Required |
-| GET | `/chat/stream/active` | None | `ActiveStreamStatusDto` or `204` | Required |
-| GET | `/search?q=...` | Query param | `List<SearchResultDto>` | Required |
+| Method | Endpoint                              | Request DTO                 | Response DTO                     | Auth     |
+| ------ | ------------------------------------- | --------------------------- | -------------------------------- | -------- |
+| POST   | `/auth/register`                      | `RegisterRequest`           | `AuthResponse`                   | Public   |
+| POST   | `/auth/login`                         | `LoginRequest`              | `AuthResponse`                   | Public   |
+| GET    | `/auth/me`                            | None                        | `AuthResponse`                   | Required |
+| POST   | `/chat`                               | `ChatRequest`               | `ChatResponse`                   | Required |
+| GET    | `/chat/sessions`                      | None                        | `List<ChatSession>`              | Required |
+| POST   | `/chat/sessions`                      | None                        | `ChatSession`                    | Required |
+| DELETE | `/chat/sessions/{sessionId}`          | None                        | Empty                            | Required |
+| PATCH  | `/chat/sessions/{sessionId}/title`    | `UpdateSessionTitleRequest` | `ChatSession`                    | Required |
+| GET    | `/chat/sessions/{sessionId}/messages` | Query params optional       | `List<Message>`                  | Required |
+| GET    | `/chat/stream/active`                 | None                        | `ActiveStreamStatusDto` or `204` | Required |
+| GET    | `/search?q=...`                       | Query param                 | `List<SearchResultDto>`          | Required |
 
 ### 14.2 STOMP Endpoints
 
-| Type | Endpoint |
-|---|---|
-| Handshake | `/api/v1/ws-chat` |
-| Publish | `/app/chat` |
-| Publish | `/app/chat/stop` |
+| Type      | Endpoint               |
+| --------- | ---------------------- |
+| Handshake | `/api/v1/ws-chat`      |
+| Publish   | `/app/chat`            |
+| Publish   | `/app/chat/stop`       |
 | Subscribe | `/user/queue/messages` |
 
 ### 14.3 API Request/Response Examples
 
 #### Register
+
 ```http
 POST /api/v1/auth/register
 Content-Type: application/json
@@ -369,6 +371,7 @@ Content-Type: application/json
 ```
 
 #### Login
+
 ```http
 POST /api/v1/auth/login
 Content-Type: application/json
@@ -387,6 +390,7 @@ Content-Type: application/json
 ```
 
 #### Chat (non-streaming)
+
 ```http
 POST /api/v1/chat
 Authorization: Bearer <token>
@@ -406,6 +410,7 @@ Content-Type: application/json
 ```
 
 #### Update Session Title
+
 ```http
 PATCH /api/v1/chat/sessions/1/title
 Authorization: Bearer <token>
@@ -417,6 +422,7 @@ Content-Type: application/json
 ```
 
 #### Search
+
 ```http
 GET /api/v1/search?q=deadline
 Authorization: Bearer <token>
@@ -436,6 +442,7 @@ Authorization: Bearer <token>
 ```
 
 #### Streaming Request (`/app/chat`)
+
 ```json
 {
   "type": "NEW",
@@ -452,7 +459,9 @@ Authorization: Bearer <token>
 ```
 
 #### Streaming Events (`/user/queue/messages`)
+
 Chunk:
+
 ```json
 {
   "clientStreamId": "uuid-1",
@@ -463,6 +472,7 @@ Chunk:
 ```
 
 Done:
+
 ```json
 {
   "clientStreamId": "uuid-1",
@@ -473,6 +483,7 @@ Done:
 ```
 
 Error:
+
 ```json
 {
   "clientStreamId": "uuid-1",
@@ -517,11 +528,11 @@ sequenceDiagram
 
 ### 16.1 Components
 
-| Class | Role |
-|---|---|
-| `OllamaClient` | Sync response generation for `POST /chat` |
-| `OllamaStreamingServiceImpl` | Reactive chunk streaming for WS flow |
-| `ChatPromptComposer` | Builds streaming prompt from prior turns + latest message |
+| Class                        | Role                                                      |
+| ---------------------------- | --------------------------------------------------------- |
+| `OllamaClient`               | Sync response generation for `POST /chat`                 |
+| `OllamaStreamingServiceImpl` | Reactive chunk streaming for WS flow                      |
+| `ChatPromptComposer`         | Builds streaming prompt from prior turns + latest message |
 
 ### 16.2 Request Modes
 
@@ -598,21 +609,21 @@ sequenceDiagram
 
 ## 18. Configuration Files
 
-| File | Purpose |
-|---|---|
-| `backend/src/main/resources/application.yml` | Base config, active profile, context path, JWT/OpenAPI/Ollama |
-| `backend/src/main/resources/application-prod.yml` | PostgreSQL and prod server port override |
-| `backend/src/main/resources/application.properties` | app name |
-| `frontend/src/apiConfig.js` | frontend API/WS URL behavior |
-| `backend/pom.xml` | backend dependency and build config |
-| `frontend/package.json` | frontend scripts/dependencies |
+| File                                                | Purpose                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| `backend/src/main/resources/application.yml`        | Base config, active profile, context path, JWT/OpenAPI/Ollama |
+| `backend/src/main/resources/application-prod.yml`   | PostgreSQL and prod server port override                      |
+| `backend/src/main/resources/application.properties` | app name                                                      |
+| `frontend/src/apiConfig.js`                         | frontend API/WS URL behavior                                  |
+| `backend/pom.xml`                                   | backend dependency and build config                           |
+| `frontend/package.json`                             | frontend scripts/dependencies                                 |
 
 ---
 
 ## 19. Environment Variables
 
-| Variable | Used In | Purpose | Fallback |
-|---|---|---|---|
+| Variable            | Used In                     | Purpose                         | Fallback                       |
+| ------------------- | --------------------------- | ------------------------------- | ------------------------------ |
 | `VITE_API_BASE_URL` | `frontend/src/apiConfig.js` | REST base URL and WS derivation | `http://localhost:9999/api/v1` |
 
 Backend env-driven config placeholders: **Not found in codebase**
@@ -714,14 +725,15 @@ OpenAPI route access is explicitly permitted by security configuration.
 
 Global exception handling is centralized in `GlobalExceptionHandler`:
 
-| Exception | HTTP |
-|---|---|
-| `UsernameNotFoundException` | 404 |
-| `BadCredentialsException` | 401 |
-| `RuntimeException` | 400 |
-| generic `Exception` | 500 |
+| Exception                   | HTTP |
+| --------------------------- | ---- |
+| `UsernameNotFoundException` | 404  |
+| `BadCredentialsException`   | 401  |
+| `RuntimeException`          | 400  |
+| generic `Exception`         | 500  |
 
 Error response payload (`ErrorResponse`):
+
 - `message`
 - `status`
 - `timestamp`
@@ -730,14 +742,14 @@ Error response payload (`ErrorResponse`):
 
 ## 25. Security Components
 
-| Component | Responsibility |
-|---|---|
-| `SecurityConfig` | Route policies, stateless session, JWT filter wiring |
-| `JwtFilter` | REST bearer token extraction + SecurityContext population |
-| `JwtUtil` | JWT create/parse/validate |
-| `PasswordConfig` | BCrypt `PasswordEncoder` bean |
-| `StompJwtChannelInterceptor` | STOMP CONNECT token validation |
-| `UserServiceImpl` | `UserDetailsService` implementation |
+| Component                    | Responsibility                                            |
+| ---------------------------- | --------------------------------------------------------- |
+| `SecurityConfig`             | Route policies, stateless session, JWT filter wiring      |
+| `JwtFilter`                  | REST bearer token extraction + SecurityContext population |
+| `JwtUtil`                    | JWT create/parse/validate                                 |
+| `PasswordConfig`             | BCrypt `PasswordEncoder` bean                             |
+| `StompJwtChannelInterceptor` | STOMP CONNECT token validation                            |
+| `UserServiceImpl`            | `UserDetailsService` implementation                       |
 
 ### Security flow explanation
 
@@ -765,13 +777,13 @@ Error response payload (`ErrorResponse`):
 
 ### 27.1 Common Problems
 
-| Issue | Likely Cause | What to Check |
-|---|---|---|
-| Backend cannot start | DB not reachable | `application-prod.yml` datasource settings |
-| 401 on protected APIs | Missing/invalid token | `Authorization: Bearer ...` header |
-| WS connection issues | Bad WS URL/token/connect header | `apiConfig.js`, `websocket.js`, backend running |
-| No assistant response | Ollama unavailable/model missing | `app.ai.ollama.*` settings |
-| Stream interruptions | Network/socket disruptions | client recovery path + `/chat/stream/active` |
+| Issue                 | Likely Cause                     | What to Check                                   |
+| --------------------- | -------------------------------- | ----------------------------------------------- |
+| Backend cannot start  | DB not reachable                 | `application-prod.yml` datasource settings      |
+| 401 on protected APIs | Missing/invalid token            | `Authorization: Bearer ...` header              |
+| WS connection issues  | Bad WS URL/token/connect header  | `apiConfig.js`, `websocket.js`, backend running |
+| No assistant response | Ollama unavailable/model missing | `app.ai.ollama.*` settings                      |
+| Stream interruptions  | Network/socket disruptions       | client recovery path + `/chat/stream/active`    |
 
 ### 27.2 Common Troubleshooting Commands
 
@@ -812,6 +824,7 @@ curl -i http://localhost:9999/api/v1/swagger-ui.html
 - Postman collection available at `backend/Chatbot.postman_collection.json`
 
 Operational artifacts:
+
 - CI/CD definitions: Not found in codebase
 - Dockerfiles: Not found in codebase
 - Kubernetes manifests: Not found in codebase
@@ -860,6 +873,7 @@ Discovered design choices in implementation:
 ## 32. Architecture Summary
 
 This platform implements a layered, production-oriented full-stack architecture:
+
 - React frontend handles auth, chat UX, STOMP streaming, reconnect/recovery, and search interaction.
 - Spring Boot backend exposes secured REST APIs and authenticated STOMP endpoints.
 - PostgreSQL persists users, sessions, and message turns.
@@ -883,6 +897,7 @@ This platform implements a layered, production-oriented full-stack architecture:
 ## Debugging Guide
 
 ### Backend debugging checklist
+
 1. Confirm backend profile and port (`prod`, `9999`).
 2. Validate JWT on requests.
 3. Check STOMP connect header contains bearer token.
@@ -895,6 +910,7 @@ This platform implements a layered, production-oriented full-stack architecture:
    - done/error envelope
 
 ### Frontend debugging checklist
+
 1. Verify `VITE_API_BASE_URL` or fallback URL.
 2. Confirm token exists in session storage.
 3. Confirm `/auth/me` succeeds on app bootstrap.
@@ -915,3 +931,78 @@ cd frontend && rm -rf node_modules package-lock.json && npm install
 cd frontend && npm run build && npm run preview
 ```
 
+## Environment Setup
+
+### Option 1: Using IntelliJ IDEA
+
+1. Open **Run → Edit Configurations**
+2. Select your Spring Boot application
+3. Add the following Environment Variables:
+
+```text
+JWT_SECRET=your-secret-key
+
+DB_URL=jdbc:postgresql://localhost:5432/chatbot_db
+DB_USERNAME=your-db-username
+DB_PASSWORD=your-db-password
+
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+4. Save and run the application.
+
+---
+
+### Option 2: Using .env File
+
+Create a `.env` file in the backend root directory:
+
+```env
+JWT_SECRET=your-secret-key
+
+DB_URL=jdbc:postgresql://localhost:5432/chatbot_db
+DB_USERNAME=your-db-username
+DB_PASSWORD=your-db-password
+
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+> Note: The `.env` file is excluded from Git and should never contain production secrets.
+
+---
+
+### Flyway Database Setup
+
+1. Ensure PostgreSQL is installed and running.
+
+2. Create the database before starting the application.
+
+3. Configure database credentials in `application.yml` or `application-prod.yml`.
+
+4. Do not manually modify the `flyway_schema_history` table.
+
+5. Flyway migrations run automatically on application startup.
+
+6. All new database schema changes must be added as a new migration file under:
+
+   `src/main/resources/db/migration`
+
+7. Follow Flyway namingmujhe  conventions for migration files:
+
+   `V<version>__<description>.sql`
+
+   Example:
+
+   `V3__create_user_preferences_table.sql`
+
+8. Never modify an already executed migration file in shared environments.
+
+9. Verify migration status using:
+
+   `SELECT * FROM flyway_schema_history;`
+
+10. The `chat_sessions` table includes a `model_name` column added through Flyway migration V2.
+
+11. If setting up an existing database for the first time, Flyway baseline configuration is already in place.
+
+12. Start the application normally; no manual migration execution is required.
