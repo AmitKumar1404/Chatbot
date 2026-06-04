@@ -1,12 +1,7 @@
 spring:
   profiles:
     active: prod
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      timeout: ${REDIS_TIMEOUT_MS:1000ms}
-      connect-timeout: ${REDIS_CONNECT_TIMEOUT_MS:1000ms}
+#  SPRING_PROFILES_ACTIVE=prod
 
 server:
   port: 9998
@@ -15,7 +10,7 @@ server:
 
 app:
   jwt:
-    secret: your-256-bit-secret-key-change-this-in-production-must-be-long
+    secret: ${JWT_SECRET}
     expiration: 86400000
   openapi:
     title: Chatbot Backend API
