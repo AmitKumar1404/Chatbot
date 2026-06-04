@@ -18,6 +18,11 @@ public class ActiveStreamRegistry {
     private static final Logger log = LoggerFactory.getLogger(ActiveStreamRegistry.class);
 
     private final ConcurrentMap<String, ActiveStream> activeStreams = new ConcurrentHashMap<>();
+    private final RedisInfraStateStore redisInfraStateStore;
+
+    public ActiveStreamRegistry(RedisInfraStateStore redisInfraStateStore) {
+        this.redisInfraStateStore = redisInfraStateStore;
+    }
 
     /**
      * Cancels any existing stream then creates the next one inside the same
@@ -40,6 +45,13 @@ public class ActiveStreamRegistry {
             Disposable d = Objects.requireNonNull(subscribeSupplier.get(), "subscribeSupplier");
             log.info("Stream started — principal={}, streamId={}, clientStreamId={}, sessionId={}",
                     principalName, streamId, clientStreamId, sessionId);
+            redisInfraStateStore.saveActiveStream(principalName, new RedisInfraStateStore.ActiveStreamState(
+                    streamId,
+                    clientStreamId,
+                    sessionId,
+                    assistantMessageClientId,
+                    redisInfraStateStore.getInstanceId()
+            ));
             return new ActiveStream(streamId, clientStreamId, sessionId, assistantMessageClientId, d);
         });
     }
@@ -48,25 +60,21 @@ public class ActiveStreamRegistry {
      * Returns metadata for the user's active stream, if any (used after WebSocket reconnect).
      */
     public Optional<ActiveStreamStatus> getActiveStreamStatus(String principalName) {
-        ActiveStream current = activeStreams.get(principalName);
-        if (current == null) {
-            return Optional.empty();
-        }
-        return Optional.of(new ActiveStreamStatus(
-                current.clientStreamId(),
-                current.sessionId(),
-                current.assistantMessageClientId()
-        ));
+        return redisInfraStateStore.getActiveStream(principalName)
+                .map(current -> new ActiveStreamStatus(
+                        current.clientStreamId(),
+                        current.sessionId(),
+                        current.assistantMessageClientId()
+                ));
     }
 
     /**
      * Rejects a new /app/chat when the same clientStreamId is already running (duplicate recovery guard).
      */
     public boolean isDuplicateClientStream(String principalName, String clientStreamId) {
-        ActiveStream current = activeStreams.get(principalName);
-        return current != null
-                && clientStreamId != null
-                && clientStreamId.equals(current.clientStreamId());
+        return redisInfraStateStore.getActiveStream(principalName)
+                .map(current -> clientStreamId != null && clientStreamId.equals(current.clientStreamId()))
+                .orElse(false);
     }
 
     /**
@@ -76,16 +84,28 @@ public class ActiveStreamRegistry {
      */
     // UPDATED — returns client stream id for UI correlation
     public Optional<String> cancel(String principalName, String reason) {
-        ActiveStream removed = activeStreams.remove(principalName);
-        if (removed == null) {
+        Optional<RedisInfraStateStore.ActiveStreamState> removedState =
+                redisInfraStateStore.removeActiveStream(principalName);
+        ActiveStream removedLocal = activeStreams.remove(principalName);
+
+        if (removedLocal != null) {
+            removedLocal.disposable().dispose();
+        }
+
+        if (removedState.isEmpty() && removedLocal == null) {
             log.info("No active stream to cancel — principal={}, reason={}", principalName, reason);
             return Optional.empty();
         }
 
-        removed.disposable().dispose();
         log.info("Stream cancelled — principal={}, streamId={}, clientStreamId={}, reason={}",
-                principalName, removed.streamId(), removed.clientStreamId(), reason);
-        return Optional.ofNullable(removed.clientStreamId());
+                principalName,
+                removedState.map(RedisInfraStateStore.ActiveStreamState::streamId).orElseGet(() ->
+                        removedLocal != null ? removedLocal.streamId() : null),
+                removedState.map(RedisInfraStateStore.ActiveStreamState::clientStreamId).orElseGet(() ->
+                        removedLocal != null ? removedLocal.clientStreamId() : null),
+                reason);
+        return removedState.map(RedisInfraStateStore.ActiveStreamState::clientStreamId)
+                .or(() -> Optional.ofNullable(removedLocal).map(ActiveStream::clientStreamId));
     }
 
     /**
@@ -101,10 +121,27 @@ public class ActiveStreamRegistry {
             }
             return current;
         });
-        return removed.get();
+        boolean removedFromRedis = redisInfraStateStore.removeActiveStreamIfMatches(principalName, streamId);
+        return removed.get() || removedFromRedis;
     }
     public boolean hasActiveStream(String userName) {
-        return activeStreams.containsKey(userName);
+        return redisInfraStateStore.hasActiveStream(userName) || activeStreams.containsKey(userName);
+    }
+
+    public boolean isCurrentStream(String principalName, String streamId) {
+        return redisInfraStateStore.isActiveStreamId(principalName, streamId);
+    }
+
+    public void markDisconnected(String principalName, long disconnectedAtEpochMs) {
+        redisInfraStateStore.markDisconnected(principalName, disconnectedAtEpochMs);
+    }
+
+    public void clearDisconnected(String principalName) {
+        redisInfraStateStore.clearDisconnected(principalName);
+    }
+
+    public java.util.List<String> expiredDisconnectedUsers(long cutoffEpochMs) {
+        return redisInfraStateStore.getExpiredDisconnectedUsers(cutoffEpochMs);
     }
 
     public record ActiveStreamStatus(String clientStreamId, Long sessionId, String assistantMessageClientId) {

@@ -2,19 +2,37 @@ import { Client } from '@stomp/stompjs';
 import { wsChatUrl } from './apiConfig';
 
 let stompClient = null;
+let manualDisconnectInProgress = false;
+let reconnectAttempts = 0;
+let reconnectLimitReached = false;
+
+const RECONNECT_DELAY_MS = 5000;
+const MAX_RECONNECT_ATTEMPTS = 12;
+const HEARTBEAT_INTERVAL_MS = 20000;
+
+function resetReconnectGuards() {
+  reconnectAttempts = 0;
+  reconnectLimitReached = false;
+}
 
 export function connectWebSocket({ accessToken, onMessage, onConnect, onError }) {
   if (!accessToken) {
     console.warn('[WS] connectWebSocket called without accessToken');
-    return;
+    return null;
   }
 
   disconnectWebSocket();
+  manualDisconnectInProgress = false;
+  resetReconnectGuards();
 
-  stompClient = new Client({
+  const connectionId = ++activeConnectionId;
+  let connectAttempt = 0;
+  const client = new Client({
     brokerURL: wsChatUrl(),
 
-    reconnectDelay: 5000,
+    reconnectDelay: RECONNECT_DELAY_MS,
+    heartbeatIncoming: HEARTBEAT_INTERVAL_MS,
+    heartbeatOutgoing: HEARTBEAT_INTERVAL_MS,
 
     connectHeaders: {
       Authorization: `Bearer ${accessToken}`,
@@ -22,46 +40,85 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
 
     debug: (msg) => console.debug('[STOMP debug]', msg),
 
-    onConnect: (frame) => {
-      console.log('[WS] Connected. Frame:', frame);
-
-      const sub = stompClient.subscribe('/user/queue/messages', (message) => {
-        console.debug('[WS] Message received on /user/queue/messages:', message.body);
-        onMessage(message.body);
-      });
-      console.log('[WS] Subscribed to /user/queue/messages — id:', sub.id);
-
-      if (onConnect) onConnect();
+    beforeConnect: () => {
+      connectAttempt += 1;
+      console.info("[WS] STOMP connect attempt", { connectionId, connectAttempt });
     },
 
-    // onDisconnect: () => {
-    //   console.warn('[WS] Disconnected');
-    // },
-    onDisconnect: () => {
-      console.warn('[WS] Disconnected');
-    
-      if (onError) {
-        onError();
+    onConnect: (frame) => {
+      console.log('[WS] Connected. Frame:', frame);
+      resetReconnectGuards();
+
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
       }
+
+      activeSubscription = client.subscribe('/user/queue/messages', (message) => {
+        if (client !== stompClient) {
+          console.debug('[WS] Ignoring message from stale client', { connectionId });
+          return;
+        }
+        console.debug('[WS] Message received on /user/queue/messages:', message.body);
+        onMessage(message.body, { connectionId });
+      });
+      console.info('[WS] Subscribed to /user/queue/messages', {
+        connectionId,
+        subscriptionId: activeSubscription.id,
+      });
+
+      if (onConnect) onConnect({ connectionId, frame });
+    },
+
+    onDisconnect: () => {
+      if (client !== stompClient) {
+        return;
+      }
+      console.warn('[WS] Disconnected', { connectionId });
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
+      }
+      if (onError) onError({ connectionId, reason: 'disconnect' });
     },
 
     onStompError: (frame) => {
-      console.error('[WS] STOMP broker error:', frame.headers['message'], frame);
-      if (onError) onError(frame);
-    },
-
-    // onWebSocketError: (error) => {
-    //   console.error('[WS] WebSocket error:', error);
-    //   if (onError) onError(error);
-    // },
-    onWebSocketError: () => {
-
-      // backend restart/offline ke time normal behavior
-    
-      if (onError) {
-        onError();
+      if (client !== stompClient) {
+        return;
       }
+      console.error('[WS] STOMP broker error:', frame.headers['message'], frame);
+      if (onError) onError({ connectionId, reason: 'stomp-error', frame });
     },
+
+    onWebSocketError: (error) => {
+      if (client !== stompClient) {
+        return;
+      }
+      console.warn('[WS] WebSocket error', { connectionId, error });
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
+      }
+      if (onError) onError({ connectionId, reason: 'ws-error', error });
+    },
+
+    onWebSocketClose: (event) => {
+      if (client !== stompClient) {
+        return;
+      }
+      console.warn('[WS] WebSocket closed', {
+        connectionId,
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+      });
+      if (activeSubscription) {
+        activeSubscription.unsubscribe();
+        activeSubscription = null;
+      }
+      if (onError) onError({ connectionId, reason: 'ws-close', event });
+    },
+  });
 
   // onWebSocketClose: (event) => {
   //   console.warn('[WS] WebSocket closed:', event);
@@ -76,6 +133,17 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
     // 1001 = server restart/navigation
     // 1006 = backend temporarily unavailable
   
+    if (!manualDisconnectInProgress && !reconnectLimitReached) {
+      reconnectAttempts += 1;
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        reconnectLimitReached = true;
+        if (stompClient) {
+          stompClient.reconnectDelay = 0;
+        }
+        console.error('[WS] Reconnect attempt limit reached; auto-reconnect paused.');
+      }
+    }
+
     const expected =
       event.code === 1000 ||
       event.code === 1001 ||
@@ -124,7 +192,10 @@ export function sendStopSignal() {
 
 export function disconnectWebSocket() {
   if (stompClient) {
+    manualDisconnectInProgress = true;
     stompClient.deactivate();
     stompClient = null;
+    activeConnectionId += 1;
   }
+  resetReconnectGuards();
 }
