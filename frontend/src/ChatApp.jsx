@@ -49,6 +49,20 @@ function getInitialIsDesktopViewport() {
   return window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
 }
 
+function readStreamOwnership() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(STREAM_OWNERSHIP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed.clientStreamId || !parsed.assistantMessageId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -135,7 +149,10 @@ function mapDbRowsToUi(rows, { chatId, ownedStream, username }) {
   );
 }
 
-function hasSuppressedIncompleteAssistant(rows, { chatId, ownedStream, username }) {
+function hasSuppressedIncompleteAssistant(
+  rows,
+  { chatId, ownedStream, username }
+) {
   return rows.some(
     (row) =>
       row?.generationComplete === false &&
@@ -243,7 +260,12 @@ export default function ChatApp() {
 
   const stopRef = useRef(false);
   const recoveryPollRef = useRef(null);
+  const recoveryPollAbortRef = useRef(null);
+  const recoveryAbortRef = useRef(null);
+  const recoveryRunIdRef = useRef(0);
   const recoveryInFlightRef = useRef(false);
+  const connectedRef = useRef(false);
+  const latestWsConnectionIdRef = useRef(null);
   const isStreamingRef = useRef(false);
   const activeChatIdRef = useRef(activeChatId);
   const chatsRef = useRef(chats);
@@ -254,6 +276,8 @@ export default function ChatApp() {
   const streamUserMessageIdRef = useRef(null);
   const streamEditTargetRef = useRef(null);
   const resumeAttemptedForStreamIdRef = useRef(null);
+  const streamReplayPrefixRef = useRef(null);
+  const streamReplayCursorRef = useRef(0);
   const activeStreamBootstrapAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -425,6 +449,18 @@ export default function ChatApp() {
     setIsStreaming(value);
   }, []);
 
+  const setConnectedState = useCallback((value) => {
+    connectedRef.current = value;
+    setConnected(value);
+  }, []);
+
+  const abortRecoveryRequests = useCallback(() => {
+    if (recoveryAbortRef.current) {
+      recoveryAbortRef.current.abort();
+      recoveryAbortRef.current = null;
+    }
+  }, []);
+
   const setOwnedStream = useCallback(
     ({ clientStreamId, assistantMessageId, sessionId }) => {
       if (typeof window === "undefined") return;
@@ -460,7 +496,8 @@ export default function ChatApp() {
       if (!active?.clientStreamId || !active?.assistantMessageId) return false;
       const owned = readStreamOwnership();
       if (!owned) return false;
-      if (owned.username && username && owned.username !== username) return false;
+      if (owned.username && username && owned.username !== username)
+        return false;
       if (owned.clientStreamId !== active.clientStreamId) return false;
       if (owned.assistantMessageId !== active.assistantMessageId) return false;
       if (owned.sessionId != null && active.sessionId != null) {
@@ -482,24 +519,27 @@ export default function ChatApp() {
     }
   }, []);
 
-  const markDisconnected = useCallback((reason) => {
-    setConnectedState(false);
-    setIsRecovering(false);
-    setStatusText("Disconnected");
-    clearRecoveryPoll();
-    abortRecoveryRequests();
-    console.warn("[Stream] Connection lost", {
-      reason,
-      isStreaming: isStreamingRef.current,
-      activeClientStreamId: activeClientStreamIdRef.current,
-    });
-    if (isStreamingRef.current && activeClientStreamIdRef.current) {
-      console.info("[Stream] Stream paused due to disconnect", {
+  const markDisconnected = useCallback(
+    (reason) => {
+      setConnectedState(false);
+      setIsRecovering(false);
+      setStatusText("Disconnected");
+      clearRecoveryPoll();
+      abortRecoveryRequests();
+      console.warn("[Stream] Connection lost", {
         reason,
-        clientStreamId: activeClientStreamIdRef.current,
+        isStreaming: isStreamingRef.current,
+        activeClientStreamId: activeClientStreamIdRef.current,
       });
-    }
-  }, [abortRecoveryRequests, clearRecoveryPoll, setConnectedState]);
+      if (isStreamingRef.current && activeClientStreamIdRef.current) {
+        console.info("[Stream] Stream paused due to disconnect", {
+          reason,
+          clientStreamId: activeClientStreamIdRef.current,
+        });
+      }
+    },
+    [abortRecoveryRequests, clearRecoveryPoll, setConnectedState]
+  );
 
   const startReplayDedup = useCallback((chatId, assistantId) => {
     const chat = chatsRef.current.find((c) => c.id === chatId);
@@ -548,11 +588,14 @@ export default function ChatApp() {
           ownedStream,
           username,
         });
-        const containsHiddenIncomplete = hasSuppressedIncompleteAssistant(rows, {
-          chatId,
-          ownedStream,
-          username,
-        });
+        const containsHiddenIncomplete = hasSuppressedIncompleteAssistant(
+          rows,
+          {
+            chatId,
+            ownedStream,
+            username,
+          }
+        );
         setChats((prev) =>
           prev.map((c) =>
             c.id === chatId
@@ -807,11 +850,14 @@ export default function ChatApp() {
 
       resumeAttemptedForStreamIdRef.current = clientStreamId;
       startReplayDedup(chatId, assistantId);
-      console.info("[Stream] Active stream missing after reconnect, restarting generation", {
-        chatId,
-        assistantId,
-        clientStreamId,
-      });
+      console.info(
+        "[Stream] Active stream missing after reconnect, restarting generation",
+        {
+          chatId,
+          assistantId,
+          clientStreamId,
+        }
+      );
 
       sendMessage(payload);
       return true;
@@ -819,143 +865,146 @@ export default function ChatApp() {
     [buildStreamResumePayload, startReplayDedup]
   );
 
-  const recoverInterruptedStream = useCallback(async (connectionId) => {
-    if (!token || !isStreamingRef.current || stopRef.current) return;
-    if (recoveryInFlightRef.current) return;
-    recoveryInFlightRef.current = true;
-    const recoveryRunId = ++recoveryRunIdRef.current;
-    abortRecoveryRequests();
-    const recoveryAbort = new AbortController();
-    recoveryAbortRef.current = recoveryAbort;
+  const recoverInterruptedStream = useCallback(
+    async (connectionId) => {
+      if (!token || !isStreamingRef.current || stopRef.current) return;
+      if (recoveryInFlightRef.current) return;
+      recoveryInFlightRef.current = true;
+      const recoveryRunId = ++recoveryRunIdRef.current;
+      abortRecoveryRequests();
+      const recoveryAbort = new AbortController();
+      recoveryAbortRef.current = recoveryAbort;
 
-    setIsRecovering(true);
-    setStatusText("Resuming…");
-    console.info("[Stream] Recovery attempt started", {
-      recoveryRunId,
-      connectionId,
-      clientStreamId: activeClientStreamIdRef.current,
-    });
-
-    try {
-      let assistantId = streamAssistantMessageIdRef.current;
-      let clientStreamId = activeClientStreamIdRef.current;
-
-      const active = await fetchActiveStream(token, {
-        signal: recoveryAbort.signal,
+      setIsRecovering(true);
+      setStatusText("Resuming…");
+      console.info("[Stream] Recovery attempt started", {
+        recoveryRunId,
+        connectionId,
+        clientStreamId: activeClientStreamIdRef.current,
       });
-      if (latestWsConnectionIdRef.current !== connectionId) return;
 
-      if (active) {
-        clientStreamId = active.clientStreamId;
-        assistantId = active.assistantMessageId;
-        activeClientStreamIdRef.current = clientStreamId;
-        streamAssistantMessageIdRef.current = assistantId;
-        if (active.sessionId != null) {
-          streamChatIdRef.current = active.sessionId;
-        }
-      }
+      try {
+        let assistantId = streamAssistantMessageIdRef.current;
+        let clientStreamId = activeClientStreamIdRef.current;
 
-      const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
-      if (targetChatId == null || !assistantId || !clientStreamId) return;
-
-      const alreadyComplete = await syncMessagesFromServer(
-        targetChatId,
-        assistantId,
-        { signal: recoveryAbort.signal }
-      );
-      if (latestWsConnectionIdRef.current !== connectionId) return;
-
-      if (alreadyComplete) {
-        console.info("[Stream] Recovery found stream already completed", {
-          recoveryRunId,
-          clientStreamId,
+        const active = await fetchActiveStream(token, {
+          signal: recoveryAbort.signal,
         });
-        finalizeStream();
-        return;
-      }
+        if (latestWsConnectionIdRef.current !== connectionId) return;
 
-      if (!active) {
-        const restarted = restartInterruptedGeneration(
+        if (active) {
+          clientStreamId = active.clientStreamId;
+          assistantId = active.assistantMessageId;
+          activeClientStreamIdRef.current = clientStreamId;
+          streamAssistantMessageIdRef.current = assistantId;
+          if (active.sessionId != null) {
+            streamChatIdRef.current = active.sessionId;
+          }
+        }
+
+        const targetChatId = streamChatIdRef.current ?? activeChatIdRef.current;
+        if (targetChatId == null || !assistantId || !clientStreamId) return;
+
+        const alreadyComplete = await syncMessagesFromServer(
           targetChatId,
           assistantId,
-          clientStreamId
+          { signal: recoveryAbort.signal }
         );
-        if (restarted) {
-          console.info("[Stream] Recovery restart dispatched", {
+        if (latestWsConnectionIdRef.current !== connectionId) return;
+
+        if (alreadyComplete) {
+          console.info("[Stream] Recovery found stream already completed", {
+            recoveryRunId,
+            clientStreamId,
+          });
+          finalizeStream();
+          return;
+        }
+
+        if (!active) {
+          const restarted = restartInterruptedGeneration(
+            targetChatId,
+            assistantId,
+            clientStreamId
+          );
+          if (restarted) {
+            console.info("[Stream] Recovery restart dispatched", {
+              recoveryRunId,
+              clientStreamId,
+            });
+          }
+        } else {
+          streamReplayPrefixRef.current = null;
+          streamReplayCursorRef.current = 0;
+          console.info("[Stream] Recovery bound to backend active stream", {
             recoveryRunId,
             clientStreamId,
           });
         }
-      } else {
-        streamReplayPrefixRef.current = null;
-        streamReplayCursorRef.current = 0;
-        console.info("[Stream] Recovery bound to backend active stream", {
-          recoveryRunId,
-          clientStreamId,
-        });
-      }
 
-      clearRecoveryPoll();
-      recoveryPollRef.current = setInterval(async () => {
-        if (recoveryRunIdRef.current !== recoveryRunId) {
-          clearRecoveryPoll();
-          return;
-        }
-        if (!isStreamingRef.current || stopRef.current) {
-          clearRecoveryPoll();
-          return;
-        }
-        if (latestWsConnectionIdRef.current !== connectionId) {
-          clearRecoveryPoll();
-          return;
-        }
-        try {
-          const tid = streamChatIdRef.current ?? activeChatIdRef.current;
-          const aid = streamAssistantMessageIdRef.current;
-          if (tid == null || !aid) return;
-          if (recoveryPollAbortRef.current) {
-            recoveryPollAbortRef.current.abort();
-          }
-          const pollAbort = new AbortController();
-          recoveryPollAbortRef.current = pollAbort;
-          const complete = await syncMessagesFromServer(tid, aid, {
-            signal: pollAbort.signal,
-          });
-          if (complete) {
+        clearRecoveryPoll();
+        recoveryPollRef.current = setInterval(async () => {
+          if (recoveryRunIdRef.current !== recoveryRunId) {
             clearRecoveryPoll();
-            finalizeStream();
+            return;
           }
-        } catch (e) {
-          if (e?.name === "AbortError") return;
-          console.error("[Stream] Recovery polling failed", e);
+          if (!isStreamingRef.current || stopRef.current) {
+            clearRecoveryPoll();
+            return;
+          }
+          if (latestWsConnectionIdRef.current !== connectionId) {
+            clearRecoveryPoll();
+            return;
+          }
+          try {
+            const tid = streamChatIdRef.current ?? activeChatIdRef.current;
+            const aid = streamAssistantMessageIdRef.current;
+            if (tid == null || !aid) return;
+            if (recoveryPollAbortRef.current) {
+              recoveryPollAbortRef.current.abort();
+            }
+            const pollAbort = new AbortController();
+            recoveryPollAbortRef.current = pollAbort;
+            const complete = await syncMessagesFromServer(tid, aid, {
+              signal: pollAbort.signal,
+            });
+            if (complete) {
+              clearRecoveryPoll();
+              finalizeStream();
+            }
+          } catch (e) {
+            if (e?.name === "AbortError") return;
+            console.error("[Stream] Recovery polling failed", e);
+          }
+        }, 1500);
+      } catch (e) {
+        if (e?.name === "AbortError") {
+          console.debug("[Stream] Recovery request aborted");
+          return;
         }
-      }, 1500);
-    } catch (e) {
-      if (e?.name === "AbortError") {
-        console.debug("[Stream] Recovery request aborted");
-        return;
+        console.error("[Stream] Recovery failed", e);
+      } finally {
+        recoveryInFlightRef.current = false;
+        if (recoveryAbortRef.current === recoveryAbort) {
+          recoveryAbortRef.current = null;
+        }
+        if (
+          recoveryRunIdRef.current === recoveryRunId &&
+          latestWsConnectionIdRef.current === connectionId
+        ) {
+          setIsRecovering(false);
+        }
       }
-      console.error("[Stream] Recovery failed", e);
-    } finally {
-      recoveryInFlightRef.current = false;
-      if (recoveryAbortRef.current === recoveryAbort) {
-        recoveryAbortRef.current = null;
-      }
-      if (
-        recoveryRunIdRef.current === recoveryRunId &&
-        latestWsConnectionIdRef.current === connectionId
-      ) {
-        setIsRecovering(false);
-      }
-    }
-  }, [
-    abortRecoveryRequests,
-    clearRecoveryPoll,
-    finalizeStream,
-    restartInterruptedGeneration,
-    syncMessagesFromServer,
-    token,
-  ]);
+    },
+    [
+      abortRecoveryRequests,
+      clearRecoveryPoll,
+      finalizeStream,
+      restartInterruptedGeneration,
+      syncMessagesFromServer,
+      token,
+    ]
+  );
 
   const appendAssistantChunk = useCallback((chunk) => {
     if (stopRef.current) return;
@@ -1115,7 +1164,7 @@ export default function ChatApp() {
       accessToken: token,
       onMessage: handleStreamBody,
       onConnect: () => {
-        setConnected(true);
+        setConnectedState(true);
         activeStreamBootstrapAttemptedRef.current = false;
         if (isStreamingRef.current && activeClientStreamIdRef.current) {
           console.info("[Stream] Reconnected, attempting stream recovery", {
@@ -1823,9 +1872,7 @@ export default function ChatApp() {
                         className={`chat-item chat-search-item ${
                           result.sessionId === activeChatId ? "active" : ""
                         }`}
-                        onClick={() =>
-                          handleSearchResultClick(result)
-                        }
+                        onClick={() => handleSearchResultClick(result)}
                       >
                         <span className="chat-search-title">
                           {result.sessionTitle || "New chat"}

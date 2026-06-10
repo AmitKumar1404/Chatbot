@@ -26,3 +26,23 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
   packages-to-scan: com.chatbot.controller
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+  endpoint:
+    health:
+      show-details: never
+
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: Chatbot Backend
+    version: 1.0.0
+    description: ChatGPT-like AI chatbot backend

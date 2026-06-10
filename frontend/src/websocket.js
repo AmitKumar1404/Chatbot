@@ -5,6 +5,8 @@ let stompClient = null;
 let manualDisconnectInProgress = false;
 let reconnectAttempts = 0;
 let reconnectLimitReached = false;
+let activeConnectionId = 0;
+let activeSubscription = null;
 
 const RECONNECT_DELAY_MS = 5000;
 const MAX_RECONNECT_ATTEMPTS = 12;
@@ -118,7 +120,7 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
       }
       if (onError) onError({ connectionId, reason: 'ws-close', event });
     },
-  });
+  
 
   // onWebSocketClose: (event) => {
   //   console.warn('[WS] WebSocket closed:', event);
@@ -158,8 +160,10 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
     }
   },
 });
+  stompClient = client;
   console.log('[WS] Activating STOMP client…');
   stompClient.activate();
+  return connectionId;
 }
 
 const JSON_CT = { 'content-type': 'application/json' };
