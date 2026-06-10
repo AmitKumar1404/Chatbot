@@ -174,9 +174,9 @@ public class ChatServiceImpl implements ChatService {
                 target.setAiResponse("");
                 target.setAssistantBubbleClientId(assistantMessageClientId);
                 target.setGenerationComplete(false);
-                target.setTimestamp(Instant.now());
+//                target.setTimestamp(Instant.now());
                 messageRepository.save(target);
-                messageRepository.deleteByChatSession_IdAndIdGreaterThan(session.getId(), target.getId());
+//                messageRepository.deleteByChatSession_IdAndIdGreaterThan(session.getId(), target.getId());
             } else {
                 messageRepository
                         .findByChatSession_IdAndAssistantBubbleClientId(session.getId(), assistantMessageClientId)
@@ -253,9 +253,9 @@ public class ChatServiceImpl implements ChatService {
                 target.setAiResponse(assistantText == null ? "" : assistantText);
                 target.setAssistantBubbleClientId(assistantMessageClientId);
                 target.setGenerationComplete(true);
-                target.setTimestamp(Instant.now());
+//                target.setTimestamp(Instant.now());
                 messageRepository.save(target);
-                messageRepository.deleteByChatSession_IdAndIdGreaterThan(session.getId(), target.getId());
+//                messageRepository.deleteByChatSession_IdAndIdGreaterThan(session.getId(), target.getId());
             } else {
                 Optional<Message> existing = messageRepository
                         .findByChatSession_IdAndAssistantBubbleClientId(session.getId(), assistantMessageClientId);

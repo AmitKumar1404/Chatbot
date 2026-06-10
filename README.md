@@ -1006,3 +1006,10 @@ OLLAMA_MODEL=qwen2.5:7b
 11. If setting up an existing database for the first time, Flyway baseline configuration is already in place.
 
 12. Start the application normally; no manual migration execution is required.
+
+### Monitoring Endpoints
+
+| Endpoint                    | Description                                  |
+| --------------------------- | -------------------------------------------- |
+| GET /api/v1/actuator/health | Application health status                    |
+| GET /api/v1/actuator/info   | Application metadata and version information |

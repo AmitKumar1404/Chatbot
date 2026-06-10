@@ -51,7 +51,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
-                                "/swagger-ui.html").permitAll()
+                                "/swagger-ui.html",
+                                "/actuator/**").permitAll()
                         .requestMatchers(H2_CONSOLE_ALL, WS_CHAT_ALL).permitAll()
                         .requestMatchers(CHAT_ALL, SEARCH_ALL).authenticated()
                         .anyRequest().authenticated())
