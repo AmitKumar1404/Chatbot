@@ -1013,3 +1013,18 @@ OLLAMA_MODEL=qwen2.5:7b
 | --------------------------- | -------------------------------------------- |
 | GET /api/v1/actuator/health | Application health status                    |
 | GET /api/v1/actuator/info   | Application metadata and version information |
+
+### Rate Limiting
+
+Implemented IP-based rate limiting using Bucket4j.
+
+Default limits:
+
+- Login API: 5 requests per minute per IP
+- Chat API: 60 requests per minute per IP
+
+Rate limit violations return HTTP 429 (Too Many Requests) using the standard API error response format.
+
+Configuration:
+app.rate-limit.login._
+app.rate-limit.chat._

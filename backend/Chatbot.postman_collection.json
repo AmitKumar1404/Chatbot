@@ -440,6 +440,78 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "Rate Limiting Tests",
+			"item": [
+				{
+					"name": "Login Rate Limit Test",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"rate-limit-invalid-user\",\n  \"password\": \"wrong-password\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"login"
+							],
+							"query": []
+						},
+						"description": "Rate limit target: POST /auth/login\nConfigured limit: 5 requests/minute per IP\nHow to run: execute this same request 6+ times within one minute\nExpected initial response: 401 with message 'Invalid username or password'\nExpected rate-limit response: 429 with message 'Rate limit exceeded. Please try again later.'"
+					}
+				},
+				{
+					"name": "Chat Rate Limit Test",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/chat/sessions",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"chat",
+								"sessions"
+							],
+							"query": []
+						},
+						"description": "Rate limit target: /chat/** using GET /chat/sessions\nConfigured limit: 60 requests/minute per IP\nPrerequisite: set collection variable {{token}} to a valid JWT\nHow to run: execute this same request 61+ times within one minute\nExpected initial response: 200\nExpected rate-limit response: 429 with message 'Rate limit exceeded. Please try again later.'"
+					}
+				}
+			]
 		}
 	]
 }
