@@ -33,3 +33,13 @@ app:
       base-url: http://localhost:11434
       model: ${OLLAMA_MODEL:qwen2.5:7b}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
+  rate-limit:
+    login:
+      capacity: 5
+      refill-tokens: 5
+      refill-duration-seconds: 60
+
+    chat:
+      capacity: 60
+      refill-tokens: 60
+      refill-duration-seconds: 60
