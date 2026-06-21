@@ -17,6 +17,7 @@ import com.chatbot.security.JwtFilter;
 
 import static com.chatbot.constant.AppConstants.AUTH_BASE_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_LOGIN_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_REFRESH_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REGISTER_PATH;
 import static com.chatbot.constant.AppConstants.CHAT_ALL;
 import static com.chatbot.constant.AppConstants.H2_CONSOLE_ALL;
@@ -50,7 +51,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST,
                                 AUTH_BASE_PATH + AUTH_LOGIN_PATH,
-                                AUTH_BASE_PATH + AUTH_REGISTER_PATH).permitAll()
+                                AUTH_BASE_PATH + AUTH_REGISTER_PATH,
+                                AUTH_BASE_PATH + AUTH_REFRESH_PATH).permitAll()
                         .requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
