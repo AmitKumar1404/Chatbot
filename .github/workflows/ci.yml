@@ -8,6 +8,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+
+        env:
+          POSTGRES_DB: chatbot_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -21,9 +39,9 @@ jobs:
       - name: Build Backend and Run Tests
         working-directory: backend
         env:
-          DB_URL: ${{ secrets.DB_URL }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_URL: jdbc:postgresql://localhost:5432/chatbot_db
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: mvn clean test
 
