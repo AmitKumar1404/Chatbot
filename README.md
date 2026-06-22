@@ -1013,3 +1013,36 @@ OLLAMA_MODEL=qwen2.5:7b
 | --------------------------- | -------------------------------------------- |
 | GET /api/v1/actuator/health | Application health status                    |
 | GET /api/v1/actuator/info   | Application metadata and version information |
+
+### Rate Limiting
+
+Implemented IP-based rate limiting using Bucket4j.
+
+Default limits:
+
+- Login API: 5 requests per minute per IP
+- Chat API: 60 requests per minute per IP
+
+Rate limit violations return HTTP 429 (Too Many Requests) using the standard API error response format.
+
+Configuration:
+app.rate-limit.login._
+app.rate-limit.chat._
+
+## Continuous Integration
+
+This project uses GitHub Actions for Continuous Integration (CI).
+The CI pipeline automatically runs on every push and pull request to ensure code quality and prevent broken builds.
+
+### CI Checks
+
+- Build and test the Spring Boot backend using Java 17
+- Install frontend dependencies using npm
+- Build the React/Vite frontend
+- Validate pull requests before merging
+
+The workflow configuration is located at:
+
+```text
+.github/workflows/ci.yml
+```
