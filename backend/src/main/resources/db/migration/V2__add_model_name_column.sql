@@ -1,2 +1,2 @@
 ALTER TABLE chat_sessions
-ADD COLUMN model_name VARCHAR(100);
+ADD COLUMN IF NOT EXISTS model_name VARCHAR(100);
