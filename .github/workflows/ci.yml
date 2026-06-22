@@ -20,6 +20,11 @@ jobs:
 
       - name: Build Backend and Run Tests
         working-directory: backend
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: mvn clean test
 
       - name: Setup Node.js
