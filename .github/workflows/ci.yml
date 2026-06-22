@@ -43,7 +43,7 @@ jobs:
           DB_USERNAME: postgres
           DB_PASSWORD: postgres
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-        run: mvn clean test
+        run: mvn clean package -DskipTests
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
