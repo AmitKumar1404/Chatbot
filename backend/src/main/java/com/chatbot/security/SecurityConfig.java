@@ -1,5 +1,6 @@
 package com.chatbot.security;
 
+import com.chatbot.ratelimit.IpRateLimitingFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -26,9 +27,11 @@ import static com.chatbot.constant.AppConstants.WS_CHAT_ALL;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private final IpRateLimitingFilter ipRateLimitingFilter;
     private final JwtFilter jwtFilter;
 
-    public SecurityConfig(JwtFilter jwtFilter) {
+    public SecurityConfig(IpRateLimitingFilter ipRateLimitingFilter, JwtFilter jwtFilter) {
+        this.ipRateLimitingFilter = ipRateLimitingFilter;
         this.jwtFilter = jwtFilter;
     }
 
@@ -56,7 +59,8 @@ public class SecurityConfig {
                         .requestMatchers(H2_CONSOLE_ALL, WS_CHAT_ALL).permitAll()
                         .requestMatchers(CHAT_ALL, SEARCH_ALL).authenticated()
                         .anyRequest().authenticated())
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(ipRateLimitingFilter, JwtFilter.class);
 
         return http.build();
     }
