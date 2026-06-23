@@ -12,6 +12,7 @@ app:
   jwt:
     secret: ${JWT_SECRET}
     expiration: 86400000
+    refresh-expiration: 2592000000
   openapi:
     title: Chatbot Backend API
     description: REST APIs for authentication, chat sessions, messaging, and search.

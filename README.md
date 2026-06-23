@@ -1046,3 +1046,23 @@ The workflow configuration is located at:
 ```text
 .github/workflows/ci.yml
 ```
+
+## Refresh Token Authentication
+
+Implemented refresh token-based authentication to improve security and user experience.
+
+### Features
+
+- JWT access token authentication
+- Refresh token support
+- Refresh token rotation
+- Revoked token protection
+- SHA-256 hashed refresh token storage
+- `/auth/refresh` endpoint for access token renewal
+- `/auth/me` endpoint for authenticated user validation
+
+### Security
+
+- Refresh tokens are stored as hashes in the database.
+- Used refresh tokens are revoked immediately.
+- Reuse of revoked or expired refresh tokens returns HTTP 401.
