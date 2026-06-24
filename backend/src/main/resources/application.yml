@@ -1,6 +1,7 @@
 spring:
   profiles:
     active: prod
+#  SPRING_PROFILES_ACTIVE=prod
 
 server:
   port: 9998
@@ -9,10 +10,40 @@ server:
 
 app:
   jwt:
-    secret: your-256-bit-secret-key-change-this-in-production-must-be-long
+    secret: ${JWT_SECRET}
     expiration: 86400000
+    refresh-expiration: 2592000000
+  openapi:
+    title: Chatbot Backend API
+    description: REST APIs for authentication, chat sessions, messaging, and search.
+    version: v1
   ai:
     ollama:
       base-url: http://localhost:11434
-      model: phi3
+      model: ${OLLAMA_MODEL:qwen2.5:7b}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  packages-to-scan: com.chatbot.controller
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+  endpoint:
+    health:
+      show-details: never
+
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: Chatbot Backend
+    version: 1.0.0
+    description: ChatGPT-like AI chatbot backend

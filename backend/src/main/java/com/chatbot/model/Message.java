@@ -44,4 +44,20 @@ public class Message {
 
     @Column(nullable = false)
     private Instant timestamp;
+
+    /** Client-generated id for the user bubble (WebSocket turns); used for EDIT correlation. */
+    @Column(length = 128)
+    private String userBubbleClientId;
+
+    /** Client-generated id for the assistant bubble receiving the stream. */
+    @Column(length = 128)
+    private String assistantBubbleClientId;
+
+    /**
+     * False while a WebSocket stream is still producing {@link #aiResponse}.
+     * Used by clients to detect incomplete turns after reconnect.
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean generationComplete = true;
 }

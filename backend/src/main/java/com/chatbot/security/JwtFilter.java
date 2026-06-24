@@ -17,6 +17,7 @@ import java.io.IOException;
 
 import static com.chatbot.constant.AppConstants.AUTH_BASE_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_LOGIN_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_REFRESH_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REGISTER_PATH;
 import static com.chatbot.constant.AppConstants.AUTHORIZATION_HEADER;
 import static com.chatbot.constant.AppConstants.BEARER_PREFIX;
@@ -76,6 +77,7 @@ public class JwtFilter extends OncePerRequestFilter {
     private static boolean isJwtOptionalHttpPath(String path) {
         return path.endsWith(AUTH_BASE_PATH + AUTH_LOGIN_PATH)
                 || path.endsWith(AUTH_BASE_PATH + AUTH_REGISTER_PATH)
+                || path.endsWith(AUTH_BASE_PATH + AUTH_REFRESH_PATH)
                 || path.startsWith(H2_CONSOLE_PATH);
     }
 }

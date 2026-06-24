@@ -19,6 +19,8 @@ public class StreamDownstreamEvent {
     private String type;
     private String chunk;
     private String message;
+    /** Populated on terminal frames so the client can sync the active server session id. */
+    private Long chatSessionId;
 
     public static StreamDownstreamEvent chunk(String clientStreamId, String assistantMessageId, String text) {
         StreamDownstreamEvent e = new StreamDownstreamEvent();
@@ -88,5 +90,13 @@ public class StreamDownstreamEvent {
 
     public void setMessage(String message) {
         this.message = message;
+    }
+
+    public Long getChatSessionId() {
+        return chatSessionId;
+    }
+
+    public void setChatSessionId(Long chatSessionId) {
+        this.chatSessionId = chatSessionId;
     }
 }

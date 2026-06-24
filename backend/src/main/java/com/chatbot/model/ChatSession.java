@@ -41,4 +41,7 @@ public class ChatSession {
 
     @Column(nullable = false)
     private Instant createdAt;
+
+    private String modelName;
+
 }

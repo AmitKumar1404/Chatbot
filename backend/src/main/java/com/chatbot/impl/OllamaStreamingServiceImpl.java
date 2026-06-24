@@ -16,6 +16,7 @@ import java.time.Duration;
 
 // ADDED: shared constants
 import static com.chatbot.constant.StreamConstants.ERROR_PREFIX;
+import static com.chatbot.constant.StreamConstants.isTransientStreamingFailure;
 import java.util.Map;
 
 @Service
@@ -82,14 +83,31 @@ public class OllamaStreamingServiceImpl implements OllamaStreamingService {
                             })
                             // Concurrency 1: stop parsing beyond the first in-flight line when cancelled.
                             .flatMap(this::mapOllamaLineToTextFlux, 1)
-                            .filter(text -> !text.isBlank());
+                            .doOnNext(text -> log.debug(
+                                    "POST_PARSE candidate text='{}' len={} isBlank={}",
+                                    visualize(text),
+                                    text.length(),
+                                    text.isBlank()))
+                            .filter(text -> {
+                                boolean keep = text != null;
+                                if (keep) {
+                                    log.debug("POST_PARSE filter KEEP text='{}' len={}", visualize(text), text.length());
+                                } else {
+                                    log.debug("POST_PARSE filter DROP null text");
+                                }
+                                return keep;
+                            });
                 });
 
         return fromOllama
                 .timeout(Duration.ofSeconds(90))
                 .doOnComplete(() -> log.info("Ollama streaming complete for model='{}'", model))
                 .doOnError(e -> log.error("Ollama streaming error: {}", e.getMessage(), e))
-                .onErrorResume(e -> Flux.just(ERROR_PREFIX + "Streaming failed. Please try again."))
+                // Do not emit ERROR_PREFIX as a "chunk" for transient failures — that bypasses
+                // ChatWebSocketController.doOnError and gets persisted via doOnComplete.
+                .onErrorResume(e -> isTransientStreamingFailure(e)
+                        ? Flux.error(e)
+                        : Flux.just(ERROR_PREFIX + "Streaming failed. Please try again."))
                 .doFinally(sig -> {
                     if (sig == SignalType.CANCEL) {
                         log.info("Reactor cancellation propagated — model='{}'", model);
@@ -103,15 +121,42 @@ public class OllamaStreamingServiceImpl implements OllamaStreamingService {
     private Flux<String> mapOllamaLineToTextFlux(String chunk) {
         try {
             JsonNode root = objectMapper.readTree(chunk);
-            String text = root.path("response").asText();
+            JsonNode responseNode = root.get("response");
+            boolean done = root.path("done").asBoolean(false);
+            String text = responseNode == null || responseNode.isNull() ? null : responseNode.asText();
+            int length = text == null ? -1 : text.length();
+            boolean isBlank = text == null || text.isBlank();
 
-            if (text != null && !text.isBlank()) {
+            log.debug(
+                    "PARSED RESPONSE text='{}' len={} isBlank={} done={} fromRaw='{}'",
+                    visualize(text),
+                    length,
+                    isBlank,
+                    done,
+                    visualize(chunk)
+            );
+
+            // Keep whitespace-only chunks so markdown structure (tables/lists/code fences) is preserved.
+            // Only suppress the terminal Ollama frame that carries done=true with an empty response.
+            if (text != null && !(done && text.isEmpty())) {
                 log.debug("PARSED: {}", text);
                 return Flux.just(text);
             }
+
+            log.debug("PARSE_STAGE drop response text='{}' len={} done={}", visualize(text), length, done);
         } catch (Exception e) {
             log.warn("PARSE FAILED: {}", chunk);
         }
         return Flux.empty();
+    }
+
+    private static String visualize(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                .replace("\t", "\\t");
     }
 }
