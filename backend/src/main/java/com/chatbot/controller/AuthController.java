@@ -3,8 +3,10 @@ package com.chatbot.controller;
 import com.chatbot.constant.ResponseCode;
 import com.chatbot.dto.AuthResponse;
 import com.chatbot.dto.LoginRequest;
+import com.chatbot.dto.RefreshTokenRequest;
 import com.chatbot.dto.RegisterRequest;
 import com.chatbot.security.JwtUtil;
+import com.chatbot.service.RefreshTokenService;
 import com.chatbot.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import static com.chatbot.constant.AppConstants.AUTH_BASE_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_LOGIN_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_REFRESH_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REGISTER_PATH;
 
 @RestController
@@ -28,14 +31,17 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
     private final UserService userService;
+    private final RefreshTokenService refreshTokenService;
 
     public AuthController(
             AuthenticationManager authenticationManager,
             JwtUtil jwtUtil,
-            UserService userService) {
+            UserService userService,
+            RefreshTokenService refreshTokenService) {
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
         this.userService = userService;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @PostMapping(AUTH_REGISTER_PATH)
@@ -49,10 +55,18 @@ public class AuthController {
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword()));
         String token = jwtUtil.generateToken(request.getUsername());
+        String refreshToken = refreshTokenService.createRefreshToken(request.getUsername());
         AuthResponse response = AuthResponse.builder()
                 .token(token)
                 .username(request.getUsername())
+                .refreshToken(refreshToken)
                 .build();
+        return ResponseEntity.status(ResponseCode.OK).body(response);
+    }
+
+    @PostMapping(AUTH_REFRESH_PATH)
+    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        AuthResponse response = refreshTokenService.refreshAccessToken(request.getRefreshToken());
         return ResponseEntity.status(ResponseCode.OK).body(response);
     }
 

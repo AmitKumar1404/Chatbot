@@ -1,21 +1,45 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/chatbot_db
-    username: chatbot_user
-    password: password123
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     show-sql: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT_MS:1000ms}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT_MS:1000ms}
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
 
 server:
   port: 9999
 
 app:
+  redis:
+    stream:
+      active-ttl-seconds: ${REDIS_STREAM_ACTIVE_TTL_SECONDS:1800}
+      disconnected-ttl-seconds: ${REDIS_STREAM_DISCONNECTED_TTL_SECONDS:3600}
   ai:
     ollama:
       base-url: http://localhost:11434
-      model: phi3
+      model: ${OLLAMA_MODEL:qwen2.5:7b}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
+  rate-limit:
+    login:
+      capacity: 5
+      refill-tokens: 5
+      refill-duration-seconds: 60
+
+    chat:
+      capacity: 60
+      refill-tokens: 60
+      refill-duration-seconds: 60

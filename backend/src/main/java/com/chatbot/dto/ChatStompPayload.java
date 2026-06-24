@@ -36,6 +36,16 @@ public class ChatStompPayload {
     /** User message text (new prompt or edited text). */
     private String content;
 
+    /**
+     * Server-side conversation id. When null, the server creates a new session (legacy clients).
+     */
+    private Long sessionId;
+
+    /**
+     * Client id of the user bubble for {@link Type#NEW} (pairs with {@link #messageId} for the assistant).
+     */
+    private String userMessageId;
+
     /** // EDIT FEATURE — user bubble id being edited (EDIT only). */
     private String editTargetMessageId;
 
@@ -75,6 +85,22 @@ public class ChatStompPayload {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public Long getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(Long sessionId) {
+        this.sessionId = sessionId;
+    }
+
+    public String getUserMessageId() {
+        return userMessageId;
+    }
+
+    public void setUserMessageId(String userMessageId) {
+        this.userMessageId = userMessageId;
     }
 
     public String getEditTargetMessageId() {
