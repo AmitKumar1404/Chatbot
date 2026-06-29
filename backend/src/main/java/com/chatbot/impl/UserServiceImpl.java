@@ -6,12 +6,14 @@ import com.chatbot.model.User;
 import com.chatbot.repository.UserRepository;
 import com.chatbot.security.JwtUtil;
 import com.chatbot.service.UserService;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import static com.chatbot.constant.AppConstants.EMAIL_ALREADY_TAKEN;
 import static com.chatbot.constant.AppConstants.ROLE_USER;
 import static com.chatbot.constant.AppConstants.USERNAME_ALREADY_TAKEN;
 
@@ -45,11 +47,19 @@ public class UserServiceImpl implements UserService {
         if (userRepository.findByUsername(request.getUsername()).isPresent()) {
             throw new RuntimeException(USERNAME_ALREADY_TAKEN);
         }
-        User user = User.builder()
+        User.UserBuilder userBuilder = User.builder()
                 .username(request.getUsername())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .build();
-        userRepository.save(user);
+                .password(passwordEncoder.encode(request.getPassword()));
+        String email = request.getEmail();
+        if (email != null && !email.isBlank()) {
+            userBuilder.email(email.trim());
+        }
+        User user = userBuilder.build();
+        try {
+            userRepository.save(user);
+        } catch (DataIntegrityViolationException ex) {
+            throw new RuntimeException(EMAIL_ALREADY_TAKEN);
+        }
         String token = jwtUtil.generateToken(user.getUsername());
         return AuthResponse.builder()
                 .token(token)

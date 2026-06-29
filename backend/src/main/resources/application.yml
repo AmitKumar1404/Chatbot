@@ -1,31 +1,81 @@
-spring:
-  profiles:
-    active: prod
-#  SPRING_PROFILES_ACTIVE=prod
-
 server:
   port: 9998
   servlet:
     context-path: /api/v1
+
+spring:
+  config:
+    import: optional:file:.env[.properties]
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT_MS:1000ms}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT_MS:1000ms}
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
 
 app:
   jwt:
     secret: ${JWT_SECRET}
     expiration: 86400000
     refresh-expiration: 2592000000
+
+  password-reset:
+    expiration: 3600000
+
+  frontend:
+    reset-password-url: ${FRONTEND_RESET_PASSWORD_URL:http://localhost:5173/reset-password}
+
+  mail:
+    from: ${MAIL_FROM:noreply@chatbot.local}
+
   openapi:
     title: Chatbot Backend API
     description: REST APIs for authentication, chat sessions, messaging, and search.
     version: v1
+
   ai:
     ollama:
       base-url: http://localhost:11434
       model: ${OLLAMA_MODEL:qwen2.5:7b}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
 
+  redis:
+    stream:
+      active-ttl-seconds: ${REDIS_STREAM_ACTIVE_TTL_SECONDS:1800}
+      disconnected-ttl-seconds: ${REDIS_STREAM_DISCONNECTED_TTL_SECONDS:3600}
+
+  rate-limit:
+    login:
+      capacity: 5
+      refill-tokens: 5
+      refill-duration-seconds: 60
+
+    chat:
+      capacity: 60
+      refill-tokens: 60
+      refill-duration-seconds: 60
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
   packages-to-scan: com.chatbot.controller
 
 management:
@@ -36,7 +86,7 @@ management:
 
   endpoint:
     health:
-      show-details: never
+      show-details: always
 
   info:
     env:

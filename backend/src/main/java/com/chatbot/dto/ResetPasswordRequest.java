@@ -1,7 +1,7 @@
 package com.chatbot.dto;
 
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,14 +11,12 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class RegisterRequest {
+public class ResetPasswordRequest {
 
     @NotBlank
-    private String username;
+    private String token;
 
     @NotBlank
-    private String password;
-
-    @Email
-    private String email;
+    @Size(min = 6)
+    private String newPassword;
 }

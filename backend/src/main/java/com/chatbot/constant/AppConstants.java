@@ -9,6 +9,8 @@ public final class AppConstants {
     public static final String AUTH_REGISTER_PATH = "/register";
     public static final String AUTH_LOGIN_PATH = "/login";
     public static final String AUTH_REFRESH_PATH = "/refresh";
+    public static final String AUTH_FORGOT_PASSWORD_PATH = "/forgot-password";
+    public static final String AUTH_RESET_PASSWORD_PATH = "/reset-password";
     public static final String CHAT_BASE_PATH = "/chat";
     public static final String SEARCH_BASE_PATH = "/search";
     public static final String H2_CONSOLE_PATH = "/h2-console";
@@ -30,6 +32,11 @@ public final class AppConstants {
     public static final String USERNAME_ALREADY_TAKEN = "Username already taken";
     public static final String INVALID_USERNAME_OR_PASSWORD = "Invalid username or password";
     public static final String INVALID_OR_EXPIRED_REFRESH_TOKEN = "Invalid or expired refresh token";
+    public static final String INVALID_OR_EXPIRED_RESET_TOKEN = "Invalid or expired reset token";
+    public static final String EMAIL_ALREADY_TAKEN = "Email already taken";
+    public static final String PASSWORD_RESET_EMAIL_SENT =
+            "If an account with that username exists, a password reset link has been sent to the registered email.";
+    public static final String PASSWORD_RESET_SUCCESS = "Password reset successful. You can now sign in.";
     public static final String NEW_CHAT_TITLE = "New chat";
 
     public static final String AUTH_RESPONSE_TOKEN_FIELD = "token";

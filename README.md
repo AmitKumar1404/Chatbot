@@ -1066,3 +1066,242 @@ Implemented refresh token-based authentication to improve security and user expe
 - Refresh tokens are stored as hashes in the database.
 - Used refresh tokens are revoked immediately.
 - Reuse of revoked or expired refresh tokens returns HTTP 401.
+
+### Forgot Password & Reset Password
+
+This feature allows users to securely reset their password if they forget it. A unique, time-limited reset token is generated and sent to the user's registered email address. The user can then use the reset link to set a new password.
+
+# Password Reset Flow
+
+- User clicks Forgot Password.
+- User enters their registered email address.
+- Backend generates a secure reset token.
+- The token is stored in the database with an expiration time.
+- A password reset email containing the reset link is sent to the user.
+- User opens the reset link from the email.
+- User enters a new password.
+- Backend validates the token.
+- Password is updated successfully.
+- The reset token is removed to prevent reuse.
+
+- Reset tokens are valid for a limited duration (default: 1 hour).
+- A reset token can only be used once.
+- Expired or invalid tokens are rejected.
+- Password reset emails contain a frontend reset URL configured through FRONTEND_RESET_PASSWORD_URL.
+
+## Local Email Testing with Mailpit
+
+For local development, the application uses **Mailpit** as a local SMTP server. All outgoing emails (e.g., Forgot Password emails) are captured by Mailpit instead of being sent to real email addresses.
+
+### Prerequisites
+
+Install Mailpit (macOS):
+
+```bash
+brew install mailpit
+```
+
+### Start Mailpit
+
+Run the following command before starting the backend:
+
+```bash
+mailpit
+```
+
+Expected output:
+
+```text
+INFO [...] [smtpd] starting on [::]:1025 (no encryption)
+INFO [...] [http] starting on [::]:8025
+INFO [...] [http] accessible via http://localhost:8025/
+```
+
+Alternatively, you can run Mailpit as a background service:
+
+```bash
+brew services start mailpit
+```
+
+Verify that Mailpit is running:
+
+```bash
+lsof -i :1025
+```
+
+You should see Mailpit listening on port `1025`.
+
+### Local Mail Configuration
+
+The local Spring profile uses the following SMTP configuration:
+
+```yaml
+spring:
+  mail:
+    host: localhost
+    port: 1025
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+```
+
+Start the frontend:
+
+```
+npm run dev
+```
+
+### Testing Forgot Password
+
+1. Start Mailpit.
+2. Start the backend using the `local` profile.
+3. Start the frontend.
+4. Open the application and click **Forgot Password**.
+5. Submit the email address of an existing user.
+6. Open the Mailpit UI:
+
+```
+http://localhost:8025
+```
+
+7. Open the captured email.
+8. Click the password reset link and complete the reset flow.
+
+### Troubleshooting
+
+If `/actuator/health` shows:
+
+```json
+"mail": {
+  "status": "DOWN"
+}
+```
+
+Verify that Mailpit is running:
+
+```bash
+lsof -i :1025
+```
+
+If nothing is listening on port `1025`, start Mailpit:
+
+```bash
+mailpit
+```
+
+After Mailpit is running, the mail health indicator should report:
+
+```json
+"mail": {
+  "status": "UP"
+}
+```
+
+# Testing Password Reset (Production Mail Configuration)
+
+Use this setup to verify the password reset flow with a real SMTP server (e.g., Gmail).
+
+## Prerequisites
+
+- PostgreSQL is running.
+- Redis is running.
+- Frontend is running.
+- Backend `.env.prod` contains valid SMTP credentials.
+
+Example:
+
+```env
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=<your-email>
+MAIL_PASSWORD=<your-app-password>
+MAIL_FROM=<your-email>
+```
+
+## Start the Backend
+
+Enable the production profile:
+
+```bash
+export SPRING_PROFILES_ACTIVE=prod
+```
+
+Start the backend.
+
+The backend will run on:
+
+```
+http://localhost:9999
+```
+
+Verify that the application is healthy:
+
+```bash
+curl http://localhost:9999/api/v1/actuator/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "UP"
+}
+```
+
+The `mail` component should also report `UP`.
+
+## Start the Frontend
+
+The frontend uses `.env.prod` when running in production mode.
+
+Example:
+
+```env
+VITE_API_BASE_URL=http://localhost:9999/api/v1
+```
+
+Start the frontend:
+
+```bash
+npm run dev:prod
+```
+
+## Test Password Reset
+
+1. Open the application.
+2. Navigate to **Forgot Password**.
+3. Enter a registered username.
+4. Submit the request.
+5. Verify that the email is received in the configured mailbox.
+6. Open the reset link from the email.
+7. Set a new password.
+8. Sign in using the new password.
+
+## Troubleshooting
+
+### `Failed to fetch`
+
+Ensure:
+
+- Backend is running on port **9999**.
+- Frontend was started using:
+
+```bash
+npm run dev:prod
+```
+
+- `.env.prod` contains:
+
+```env
+VITE_API_BASE_URL=http://localhost:9999/api/v1
+```
+
+### Mail is not received
+
+- Verify the SMTP credentials in `.env.prod`.
+- Ensure `MAIL_USERNAME` and `MAIL_FROM` are valid.
+- Use a Gmail App Password (not the Gmail account password).
+- Confirm that the `mail` actuator health status is `UP`.
