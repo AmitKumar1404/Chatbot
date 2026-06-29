@@ -132,6 +132,82 @@
 					}
 				},
 				{
+					"name": "Forgot Password",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"jdoe\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/forgot-password",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"forgot-password"
+							],
+							"query": []
+						},
+						"description": "POST /auth/forgot-password — ForgotPasswordRequest body (served at /api/v1/auth/forgot-password)\n\nNo Authorization header required.\n\nExpected response:\n```json\n{\n  \"message\": \"If an account with that username exists, a password reset link has been sent to the registered email.\"\n}\n```"
+					}
+				},
+				{
+					"name": "Reset Password",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"<reset-token-from-email>\",\n  \"newPassword\": \"newChangeMe123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/reset-password",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"reset-password"
+							],
+							"query": []
+						},
+						"description": "POST /auth/reset-password — ResetPasswordRequest body (served at /api/v1/auth/reset-password)\n\nNo Authorization header required.\n\nExpected response:\n```json\n{\n  \"message\": \"Password reset successful. You can now sign in.\"\n}\n```\n\nExpected error (invalid/expired token): 401 with message 'Invalid or expired reset token'."
+					}
+				},
+				{
 					"name": "Refresh Token",
 					"item": [
 						{

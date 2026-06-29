@@ -16,9 +16,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import com.chatbot.security.JwtFilter;
 
 import static com.chatbot.constant.AppConstants.AUTH_BASE_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_FORGOT_PASSWORD_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_LOGIN_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REFRESH_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REGISTER_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_RESET_PASSWORD_PATH;
 import static com.chatbot.constant.AppConstants.CHAT_ALL;
 import static com.chatbot.constant.AppConstants.H2_CONSOLE_ALL;
 import static com.chatbot.constant.AppConstants.SEARCH_ALL;
@@ -52,7 +54,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST,
                                 AUTH_BASE_PATH + AUTH_LOGIN_PATH,
                                 AUTH_BASE_PATH + AUTH_REGISTER_PATH,
-                                AUTH_BASE_PATH + AUTH_REFRESH_PATH).permitAll()
+                                AUTH_BASE_PATH + AUTH_REFRESH_PATH,
+                                AUTH_BASE_PATH + AUTH_FORGOT_PASSWORD_PATH,
+                                AUTH_BASE_PATH + AUTH_RESET_PASSWORD_PATH).permitAll()
                         .requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
