@@ -39,6 +39,7 @@ jobs:
       - name: Build Backend and Run Tests
         working-directory: backend
         env:
+          SPRING_PROFILES_ACTIVE: local
           DB_URL: jdbc:postgresql://localhost:5432/chatbot_db
           DB_USERNAME: postgres
           DB_PASSWORD: postgres
