@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { API_BASE_URL } from "../apiConfig";
 
@@ -14,11 +14,13 @@ async function parseJsonSafe(res) {
   }
 }
 
-export default function RegisterPage() {
+export default function ResetPasswordPage() {
   const { token, bootstrapping } = useAuth();
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [searchParams] = useSearchParams();
+  const tokenParam = searchParams.get("token") ?? "";
+
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -39,33 +41,34 @@ export default function RegisterPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setSuccess("");
+
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    if (!tokenParam) {
+      setError("Invalid or missing reset token");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/register`, {
+      const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: username.trim(),
-          password,
-          email: email.trim(),
-        }),
+        body: JSON.stringify({ token: tokenParam, newPassword }),
       });
       const body = await parseJsonSafe(res);
       if (!res.ok) {
-        throw new Error(body?.message ?? "Registration failed");
+        throw new Error(body?.message ?? "Reset failed");
       }
-
-      setSuccess("Registration successful! Please login to continue.");
-
-      setUsername("");
-      setEmail("");
-      setPassword("");
-
-      setTimeout(() => {
-        setSuccess("");
-      }, 2000);
+      setSuccess(body?.message ?? "Password reset successful. You can now sign in.");
+      setNewPassword("");
+      setConfirmPassword("");
     } catch (err) {
-      setError(err?.message ?? "Registration failed");
+      setError(err?.message ?? "Reset failed");
     } finally {
       setSubmitting(false);
     }
@@ -74,45 +77,22 @@ export default function RegisterPage() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={handleSubmit}>
-        <h1 className="auth-title">Create account</h1>
-        <p className="auth-sub">Register to use the chatbot.</p>
+        <h1 className="auth-title">Reset password</h1>
+        <p className="auth-sub">Choose a new password for your account.</p>
         {error ? <div className="auth-error">{error}</div> : null}
-
         {success ? <div className="auth-success">{success}</div> : null}
         <label className="auth-label">
-          Username
-          <input
-            className="auth-input"
-            autoComplete="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-          />
-        </label>
-        <label className="auth-label">
-          Email
-          <input
-            className="auth-input"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </label>
-        <label className="auth-label">
-          Password
+          New password
           <div className="auth-password-wrap">
             <input
               className="auth-input auth-password-input"
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
               required
               minLength={6}
             />
-
             <button
               type="button"
               className="auth-password-toggle"
@@ -123,18 +103,26 @@ export default function RegisterPage() {
             </button>
           </div>
         </label>
-        <button className="auth-submit" type="submit" disabled={submitting}>
-          {submitting ? "Creating…" : "Register"}
+        <label className="auth-label">
+          Confirm password
+          <input
+            className="auth-input"
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+            minLength={6}
+          />
+        </label>
+        <button className="auth-submit" type="submit" disabled={submitting || !tokenParam}>
+          {submitting ? "Resetting…" : "Reset password"}
         </button>
         <p className="auth-footer">
           {success ? (
-            <>
-              Go to <Link to="/login">Login Page</Link>
-            </>
+            <Link to="/login">Go to sign in</Link>
           ) : (
-            <>
-              Already have an account? <Link to="/login">Sign in</Link>
-            </>
+            <Link to="/login">Back to sign in</Link>
           )}
         </p>
       </form>

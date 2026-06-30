@@ -1,4 +1,8 @@
-const raw = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:9999/api/v1';
+const raw = import.meta.env.VITE_API_BASE_URL;
+
+if (!raw) {
+  throw new Error('VITE_API_BASE_URL is missing');
+}
 
 export const API_BASE_URL = raw.replace(/\/$/, '');
 
@@ -13,6 +17,6 @@ export function wsChatUrl() {
     }
     return `${u.origin}${path}/ws-chat`;
   } catch {
-    return 'ws://localhost:9999/api/v1/ws-chat';
+    return 'ws://localhost:9998/api/v1/ws-chat';
   }
 }

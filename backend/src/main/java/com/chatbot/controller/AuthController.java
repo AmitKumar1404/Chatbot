@@ -3,9 +3,13 @@ package com.chatbot.controller;
 import com.chatbot.constant.ResponseCode;
 import com.chatbot.dto.AuthResponse;
 import com.chatbot.dto.LoginRequest;
+import com.chatbot.dto.ForgotPasswordRequest;
+import com.chatbot.dto.MessageResponse;
 import com.chatbot.dto.RefreshTokenRequest;
 import com.chatbot.dto.RegisterRequest;
+import com.chatbot.dto.ResetPasswordRequest;
 import com.chatbot.security.JwtUtil;
+import com.chatbot.service.PasswordResetService;
 import com.chatbot.service.RefreshTokenService;
 import com.chatbot.service.UserService;
 import jakarta.validation.Valid;
@@ -20,9 +24,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import static com.chatbot.constant.AppConstants.AUTH_BASE_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_FORGOT_PASSWORD_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_LOGIN_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REFRESH_PATH;
 import static com.chatbot.constant.AppConstants.AUTH_REGISTER_PATH;
+import static com.chatbot.constant.AppConstants.AUTH_RESET_PASSWORD_PATH;
 
 @RestController
 @RequestMapping(AUTH_BASE_PATH)
@@ -32,16 +38,19 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final UserService userService;
     private final RefreshTokenService refreshTokenService;
+    private final PasswordResetService passwordResetService;
 
     public AuthController(
             AuthenticationManager authenticationManager,
             JwtUtil jwtUtil,
             UserService userService,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            PasswordResetService passwordResetService) {
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
         this.userService = userService;
         this.refreshTokenService = refreshTokenService;
+        this.passwordResetService = passwordResetService;
     }
 
     @PostMapping(AUTH_REGISTER_PATH)
@@ -67,6 +76,18 @@ public class AuthController {
     @PostMapping(AUTH_REFRESH_PATH)
     public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
         AuthResponse response = refreshTokenService.refreshAccessToken(request.getRefreshToken());
+        return ResponseEntity.status(ResponseCode.OK).body(response);
+    }
+
+    @PostMapping(AUTH_FORGOT_PASSWORD_PATH)
+    public ResponseEntity<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        MessageResponse response = passwordResetService.requestReset(request.getUsername());
+        return ResponseEntity.status(ResponseCode.OK).body(response);
+    }
+
+    @PostMapping(AUTH_RESET_PASSWORD_PATH)
+    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        MessageResponse response = passwordResetService.resetPassword(request);
         return ResponseEntity.status(ResponseCode.OK).body(response);
     }
 
