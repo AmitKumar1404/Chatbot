@@ -294,11 +294,14 @@ body {
 
 .bubble-text {
   margin: 0;
+  max-width: 100%;
+  min-width: 0;
   padding: 10px 14px;
   border-radius: 14px;
   line-height: 1.55;
   font-size: 15px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
