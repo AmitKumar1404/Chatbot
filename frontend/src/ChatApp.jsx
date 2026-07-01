@@ -1163,7 +1163,7 @@ export default function ChatApp() {
     const connectionId = connectWebSocket({
       accessToken: token,
       onMessage: handleStreamBody,
-      onConnect: () => {
+      onConnect: (meta) => {
         setConnectedState(true);
         activeStreamBootstrapAttemptedRef.current = false;
         if (isStreamingRef.current && activeClientStreamIdRef.current) {
@@ -1176,7 +1176,7 @@ export default function ChatApp() {
           setStatusText("Connected");
         }
       },
-      onError: () => {
+      onError: (meta) => {
         setConnected(false);
         activeStreamBootstrapAttemptedRef.current = false;
         if (isStreamingRef.current) {

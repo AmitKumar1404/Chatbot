@@ -118,47 +118,38 @@ export function connectWebSocket({ accessToken, onMessage, onConnect, onError })
         activeSubscription.unsubscribe();
         activeSubscription = null;
       }
-      if (onError) onError({ connectionId, reason: 'ws-close', event });
-    },
-  
-
-  // onWebSocketClose: (event) => {
-  //   console.warn('[WS] WebSocket closed:', event);
-  
-  //   if (onError) {
-  //     onError();
-  //   }
-  // },
-  onWebSocketClose: (event) => {
-
-    // 1000 = normal close
-    // 1001 = server restart/navigation
-    // 1006 = backend temporarily unavailable
-  
-    if (!manualDisconnectInProgress && !reconnectLimitReached) {
-      reconnectAttempts += 1;
-      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        reconnectLimitReached = true;
-        if (stompClient) {
-          stompClient.reconnectDelay = 0;
+      if (!manualDisconnectInProgress && !reconnectLimitReached) {
+        reconnectAttempts += 1;
+      
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          reconnectLimitReached = true;
+      
+          if (stompClient) {
+            stompClient.reconnectDelay = 0;
+          }
+      
+          console.error(
+            "[WS] Reconnect attempt limit reached; auto-reconnect paused."
+          );
         }
-        console.error('[WS] Reconnect attempt limit reached; auto-reconnect paused.');
       }
-    }
-
-    const expected =
-      event.code === 1000 ||
-      event.code === 1001 ||
-      event.code === 1006;
-  
-    if (!expected) {
-      console.warn('[WS] WebSocket closed:', event);
-    }
-  
-    if (onError) {
-      onError();
-    }
-  },
+      const expected =
+        event.code === 1000 ||
+        event.code === 1001 ||
+        event.code === 1006;
+      
+      if (!expected) {
+        console.warn("[WS] WebSocket closed:", event);
+      }
+      // if (onError) onError({ connectionId, reason: 'ws-close', event });
+      if (!manualDisconnectInProgress && onError) {
+        onError({
+          connectionId,
+          reason: "ws-close",
+          event,
+        });
+      }
+    },
 });
   stompClient = client;
   console.log('[WS] Activating STOMP client…');
