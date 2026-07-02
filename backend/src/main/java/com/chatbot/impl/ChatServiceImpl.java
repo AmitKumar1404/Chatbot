@@ -135,6 +135,16 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
+    @Transactional
+    public ChatSession updateSessionPinned(Long sessionId, boolean pinned) {
+        User user = resolveCurrentUser();
+        ChatSession session = chatSessionRepository.findByIdAndUser_Id(sessionId, user.getId())
+                .orElseThrow(() -> new RuntimeException(SESSION_NOT_FOUND));
+        session.setPinned(pinned);
+        return chatSessionRepository.save(session);
+    }
+
+    @Override
     public ChatSession resolveStreamingSessionForUser(String username, Long sessionId, String firstUserLineForTitle) {
         return transactionTemplate.execute(status -> {
             User user = userRepository.findByUsername(username)
