@@ -66,6 +66,19 @@ export async function updateChatSessionTitleApi(token, sessionId, title) {
   return res.json();
 }
 
+export async function updateChatSessionPinnedApi(token, sessionId, pinned) {
+  const res = await fetch(
+    `${API_BASE_URL}/chat/sessions/${sessionId}/pin`,
+    {
+      method: "PATCH",
+      headers: authHeaders(token, true),
+      body: JSON.stringify({ pinned }),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to update chat session pin");
+  return res.json();
+}
+
 export async function searchChatsApi(token, query) {
   const trimmed = (query ?? "").trim();
   if (!trimmed) return [];

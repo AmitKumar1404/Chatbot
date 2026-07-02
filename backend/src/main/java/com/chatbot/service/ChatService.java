@@ -24,6 +24,8 @@ public interface ChatService {
 
     ChatSession updateSessionTitle(Long sessionId, String title);
 
+    ChatSession updateSessionPinned(Long sessionId, boolean pinned);
+
     /**
      * Resolves an owned session for WebSocket streaming, or creates one when {@code sessionId} is null.
      */
