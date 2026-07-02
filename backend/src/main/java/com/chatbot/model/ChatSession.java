@@ -44,4 +44,8 @@ public class ChatSession {
 
     private String modelName;
 
+    @Column(name = "is_pinned", nullable = false)
+    @Builder.Default
+    private boolean pinned = false;
+
 }

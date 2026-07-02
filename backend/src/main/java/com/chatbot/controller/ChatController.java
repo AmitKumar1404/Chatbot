@@ -4,6 +4,7 @@ import com.chatbot.constant.ResponseCode;
 import com.chatbot.dto.ActiveStreamStatusDto;
 import com.chatbot.dto.ChatRequest;
 import com.chatbot.dto.ChatResponse;
+import com.chatbot.dto.UpdateSessionPinnedRequest;
 import com.chatbot.dto.UpdateSessionTitleRequest;
 import com.chatbot.model.ChatSession;
 import com.chatbot.model.Message;
@@ -64,6 +65,13 @@ public class ChatController {
             @PathVariable Long sessionId,
             @Valid @RequestBody UpdateSessionTitleRequest request) {
         return ResponseEntity.status(ResponseCode.OK).body(chatService.updateSessionTitle(sessionId, request.getTitle()));
+    }
+
+    @PatchMapping("/sessions/{sessionId}/pin")
+    public ResponseEntity<ChatSession> updateSessionPinned(
+            @PathVariable Long sessionId,
+            @Valid @RequestBody UpdateSessionPinnedRequest request) {
+        return ResponseEntity.status(ResponseCode.OK).body(chatService.updateSessionPinned(sessionId, request.isPinned()));
     }
 
     @GetMapping("/sessions/{sessionId}/messages")

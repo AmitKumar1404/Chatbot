@@ -16,6 +16,7 @@ import {
   fetchActiveStream,
   deleteChatSessionApi,
   updateChatSessionTitleApi,
+  updateChatSessionPinnedApi,
   searchChatsApi,
 } from "./chatApi";
 import "./App.css";
@@ -28,6 +29,8 @@ import {
   Search,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   Trash2,
 } from "lucide-react";
 
@@ -401,6 +404,7 @@ export default function ChatApp() {
       const mapped = rows.map((s) => ({
         id: s.id,
         title: s.title || "New chat",
+        pinned: Boolean(s.pinned),
         messages: [],
         messagesLoaded: false,
       }));
@@ -415,6 +419,7 @@ export default function ChatApp() {
         const newChat = {
           id: newSession.id,
           title: newSession.title || "New chat",
+          pinned: Boolean(newSession.pinned),
           messages: [],
           messagesLoaded: true,
         };
@@ -1483,6 +1488,7 @@ export default function ChatApp() {
       const realChat = {
         id: s.id,
         title: s.title || "New chat",
+        pinned: Boolean(s.pinned),
         messages: [],
         messagesLoaded: true,
       };
@@ -1541,6 +1547,23 @@ export default function ChatApp() {
       console.error(e);
     }
   }
+
+  async function handleTogglePinned(chatId, pinned) {
+    if (!token) return;
+    try {
+      const updated = await updateChatSessionPinnedApi(token, chatId, pinned);
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId ? { ...c, pinned: Boolean(updated.pinned) } : c
+        )
+      );
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  const pinnedChats = chats.filter((chat) => chat.pinned);
+  const unpinnedChats = chats.filter((chat) => !chat.pinned);
 
   return (
     <div className="app-layout">
@@ -1621,7 +1644,10 @@ export default function ChatApp() {
 
         {!isSidebarCollapsed && !isSearchView && (
           <div className="chat-list">
-            {chats.map((chat) => (
+            {pinnedChats.length > 0 && (
+              <div className="sidebar-search-status">Pinned</div>
+            )}
+            {pinnedChats.map((chat) => (
               <div
                 key={chat.id}
                 className={`chat-item ${
@@ -1669,6 +1695,117 @@ export default function ChatApp() {
 
                   {openChatMenuId === chat.id && (
                     <div className="chat-dropdown-menu">
+                      {!String(chat.id).startsWith("draft-") && (
+                        <button
+                          type="button"
+                          className="chat-dropdown-item"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChatMenuId(null);
+                            handleTogglePinned(chat.id, !chat.pinned);
+                          }}
+                        >
+                          <Pin size={15} />
+                          {chat.pinned ? "Unpin" : "Pin"}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="chat-dropdown-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenChatMenuId(null);
+                          renameChat(chat.id);
+                        }}
+                      >
+                        <Pencil size={15} />
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        className="chat-dropdown-item delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenChatMenuId(null);
+                          deleteChat(chat.id);
+                        }}
+                      >
+                        <Trash2 size={15} />
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {pinnedChats.length > 0 && (
+              <div className="sidebar-search-status">Chats</div>
+            )}
+            {unpinnedChats.map((chat) => (
+              <div
+                key={chat.id}
+                className={`chat-item ${
+                  chat.id === activeChatId ? "active" : ""
+                }`}
+              >
+                <span onClick={() => selectChat(chat.id)}>{chat.title}</span>
+
+                {/* <div className="chat-actions">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      renameChat(chat.id);
+                    }}
+                  >
+                    ✏️
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteChat(chat.id);
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div> */}
+                {/* <div className="chat-actions"> */}
+                <div className="chat-actions">
+                  <button
+                    type="button"
+                    className="chat-menu-trigger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+
+                      setOpenChatMenuId((prev) =>
+                        prev === chat.id ? null : chat.id
+                      );
+                    }}
+                  >
+                    <MoreHorizontal size={18} />
+                  </button>
+
+                  {openChatMenuId === chat.id && (
+                    <div className="chat-dropdown-menu">
+                      {!String(chat.id).startsWith("draft-") && (
+                        <button
+                          type="button"
+                          className="chat-dropdown-item"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChatMenuId(null);
+                            handleTogglePinned(chat.id, !chat.pinned);
+                          }}
+                        >
+                          <Pin size={15} />
+                          {chat.pinned ? "Unpin" : "Pin"}
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         className="chat-dropdown-item"
