@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, memo, useCallback } from "react";
+import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import { Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -199,6 +199,15 @@ export default function ChatWindow({
     {}
   );
   const feedbackLoadingRef = useRef({});
+  const historyFeedbackByMessageId = useMemo(() => {
+    const feedback = {};
+    messages.forEach((msg) => {
+      if (msg.role === "assistant" && msg.sourceMessageId && msg.feedbackType) {
+        feedback[msg.sourceMessageId] = msg.feedbackType;
+      }
+    });
+    return feedback;
+  }, [messages]);
 
   // ===============================
   // 📋 COPY FUNCTION (NEW ADDITION)
@@ -398,7 +407,11 @@ export default function ChatWindow({
               renderedContent={renderedContent}
               shouldRenderPlainText={shouldRenderAssistantAsPlainText}
               isSearchMatch={isSearchMatch}
-              selectedFeedback={feedbackByMessageId[msg.sourceMessageId] ?? null}
+              selectedFeedback={
+                feedbackByMessageId[msg.sourceMessageId] ??
+                historyFeedbackByMessageId[msg.sourceMessageId] ??
+                null
+              }
               feedbackLoading={
                 feedbackLoadingByMessageId[msg.sourceMessageId] === true
               }

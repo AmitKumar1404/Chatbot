@@ -1,4 +1,10 @@
-import { ThumbsDown, ThumbsUp } from "lucide-react";
+// import { ThumbsDown, ThumbsUp } from "lucide-react";
+import {
+  FaThumbsUp,
+  FaRegThumbsUp,
+  FaThumbsDown,
+  FaRegThumbsDown,
+} from "react-icons/fa";
 
 export default function FeedbackButtons({
   selectedFeedback,
@@ -15,10 +21,15 @@ export default function FeedbackButtons({
         onClick={() => onFeedback("HELPFUL")}
       >
         <span className="tooltip-text">Helpful</span>
-        <ThumbsUp
+        {/* <ThumbsUp
           size={16}
           strokeWidth={selectedFeedback === "HELPFUL" ? 3 : 2}
-        />
+        /> */}
+        {selectedFeedback === "HELPFUL" ? (
+          <FaThumbsUp size={16} />
+        ) : (
+          <FaRegThumbsUp size={16} />
+        )}
       </button>
       <button
         type="button"
@@ -28,10 +39,15 @@ export default function FeedbackButtons({
         onClick={() => onFeedback("NOT_HELPFUL")}
       >
         <span className="tooltip-text">Not helpful</span>
-        <ThumbsDown
+        {/* <ThumbsDown
           size={16}
           strokeWidth={selectedFeedback === "NOT_HELPFUL" ? 3 : 2}
-        />
+        /> */}
+        {selectedFeedback === "NOT_HELPFUL" ? (
+          <FaThumbsDown size={16} />
+        ) : (
+          <FaRegThumbsDown size={16} />
+        )}
       </button>
     </>
   );

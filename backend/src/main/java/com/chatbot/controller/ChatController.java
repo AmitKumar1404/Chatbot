@@ -2,12 +2,12 @@ package com.chatbot.controller;
 
 import com.chatbot.constant.ResponseCode;
 import com.chatbot.dto.ActiveStreamStatusDto;
+import com.chatbot.dto.ChatMessageResponse;
 import com.chatbot.dto.ChatRequest;
 import com.chatbot.dto.ChatResponse;
 import com.chatbot.dto.UpdateSessionPinnedRequest;
 import com.chatbot.dto.UpdateSessionTitleRequest;
 import com.chatbot.model.ChatSession;
-import com.chatbot.model.Message;
 import com.chatbot.service.ActiveStreamRegistry;
 import com.chatbot.service.ChatService;
 import jakarta.validation.Valid;
@@ -75,7 +75,7 @@ public class ChatController {
     }
 
     @GetMapping("/sessions/{sessionId}/messages")
-    public ResponseEntity<List<Message>> messages(
+    public ResponseEntity<List<ChatMessageResponse>> messages(
             @PathVariable Long sessionId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
