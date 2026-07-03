@@ -79,6 +79,16 @@ export async function updateChatSessionPinnedApi(token, sessionId, pinned) {
   return res.json();
 }
 
+export async function updateMessageFeedbackApi(token, messageId, feedbackType) {
+  const res = await fetch(`${API_BASE_URL}/chat/messages/${messageId}/feedback`, {
+    method: "PUT",
+    headers: authHeaders(token, true),
+    body: JSON.stringify({ feedbackType }),
+  });
+  if (!res.ok) throw new Error("Failed to update message feedback");
+  return res.json();
+}
+
 export async function searchChatsApi(token, query) {
   const trimmed = (query ?? "").trim();
   if (!trimmed) return [];

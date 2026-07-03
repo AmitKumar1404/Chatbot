@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, memo, useCallback } from "react";
 import { Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { updateMessageFeedbackApi } from "../chatApi";
+import { useAuth } from "../context/AuthContext";
+import FeedbackButtons from "./FeedbackButtons";
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -107,6 +110,9 @@ const AssistantBubble = memo(function AssistantBubble({
   renderedContent,
   shouldRenderPlainText,
   isSearchMatch,
+  selectedFeedback,
+  feedbackLoading,
+  onFeedback,
 }) {
   if (msg.streaming && !(msg.content ?? "").trim()) {
     return (
@@ -160,6 +166,13 @@ const AssistantBubble = memo(function AssistantBubble({
               <Copy size={16} strokeWidth={2} />
             )}
           </button>
+          {msg.sourceMessageId && (
+            <FeedbackButtons
+              selectedFeedback={selectedFeedback}
+              loading={feedbackLoading}
+              onFeedback={onFeedback}
+            />
+          )}
         </div>
       )}
     </div>
@@ -172,6 +185,7 @@ export default function ChatWindow({
   onEditSave,
   searchMatch = null,
 }) {
+  const { token } = useAuth();
   const bottomRef = useRef(null);
   const scrollRootRef = useRef(null);
   const stickToBottomRef = useRef(true);
@@ -180,6 +194,11 @@ export default function ChatWindow({
   const [editingUserId, setEditingUserId] = useState(null);
   const [draft, setDraft] = useState("");
   const [copiedId, setCopiedId] = useState(null);
+  const [feedbackByMessageId, setFeedbackByMessageId] = useState({});
+  const [feedbackLoadingByMessageId, setFeedbackLoadingByMessageId] = useState(
+    {}
+  );
+  const feedbackLoadingRef = useRef({});
 
   // ===============================
   // 📋 COPY FUNCTION (NEW ADDITION)
@@ -296,6 +315,43 @@ export default function ChatWindow({
     [draft, onEditSave]
   );
 
+  const handleFeedback = useCallback(
+    async (messageId, feedbackType) => {
+      if (!token || !messageId || feedbackLoadingRef.current[messageId]) return;
+      feedbackLoadingRef.current = {
+        ...feedbackLoadingRef.current,
+        [messageId]: true,
+      };
+      setFeedbackLoadingByMessageId((prev) => ({
+        ...prev,
+        [messageId]: true,
+      }));
+      try {
+        const updated = await updateMessageFeedbackApi(
+          token,
+          messageId,
+          feedbackType
+        );
+        setFeedbackByMessageId((prev) => ({
+          ...prev,
+          [messageId]: updated.feedbackType,
+        }));
+      } catch (err) {
+        console.error("Feedback failed", err);
+      } finally {
+        feedbackLoadingRef.current = {
+          ...feedbackLoadingRef.current,
+          [messageId]: false,
+        };
+        setFeedbackLoadingByMessageId((prev) => ({
+          ...prev,
+          [messageId]: false,
+        }));
+      }
+    },
+    [token]
+  );
+
   return (
     <div ref={scrollRootRef} className="chat-window">
       {messages.length === 0 && (
@@ -342,6 +398,13 @@ export default function ChatWindow({
               renderedContent={renderedContent}
               shouldRenderPlainText={shouldRenderAssistantAsPlainText}
               isSearchMatch={isSearchMatch}
+              selectedFeedback={feedbackByMessageId[msg.sourceMessageId] ?? null}
+              feedbackLoading={
+                feedbackLoadingByMessageId[msg.sourceMessageId] === true
+              }
+              onFeedback={(feedbackType) =>
+                handleFeedback(msg.sourceMessageId, feedbackType)
+              }
             />
           </div>
         );
