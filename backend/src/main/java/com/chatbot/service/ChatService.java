@@ -1,10 +1,10 @@
 package com.chatbot.service;
 
 import com.chatbot.dto.ChatRequest;
+import com.chatbot.dto.ChatMessageResponse;
 import com.chatbot.dto.ChatResponse;
 import com.chatbot.dto.ChatStompPayload;
 import com.chatbot.model.ChatSession;
-import com.chatbot.model.Message;
 
 import java.util.List;
 
@@ -14,9 +14,9 @@ public interface ChatService {
 
     List<ChatSession> listSessions();
 
-    List<Message> getMessages(Long sessionId);
+    List<ChatMessageResponse> getMessages(Long sessionId);
 
-    List<Message> getMessages(Long sessionId, int page, int size);
+    List<ChatMessageResponse> getMessages(Long sessionId, int page, int size);
 
     ChatSession createEmptySession();
 
