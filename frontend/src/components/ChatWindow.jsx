@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { updateMessageFeedbackApi } from "../chatApi";
 import { useAuth } from "../context/AuthContext";
 import FeedbackButtons from "./FeedbackButtons";
+import FeedbackReasonModal from "./FeedbackReasonModal";
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -198,6 +199,10 @@ export default function ChatWindow({
   const [feedbackLoadingByMessageId, setFeedbackLoadingByMessageId] = useState(
     {}
   );
+  const [isFeedbackReasonModalOpen, setIsFeedbackReasonModalOpen] =
+    useState(false);
+  const [pendingFeedbackMessageId, setPendingFeedbackMessageId] =
+    useState(null);
   const feedbackLoadingRef = useRef({});
   const historyFeedbackByMessageId = useMemo(() => {
     const feedback = {};
@@ -324,13 +329,18 @@ export default function ChatWindow({
     [draft, onEditSave]
   );
 
-  const handleFeedback = useCallback(
-    async (messageId, feedbackType) => {
+  const getSelectedFeedback = useCallback(
+    (messageId) =>
+      feedbackByMessageId[messageId] ??
+      historyFeedbackByMessageId[messageId] ??
+      null,
+    [feedbackByMessageId, historyFeedbackByMessageId]
+  );
+
+  const submitFeedback = useCallback(
+    async (messageId, feedbackType, feedbackReason) => {
       if (!token || !messageId || feedbackLoadingRef.current[messageId]) return;
-      const selectedFeedback =
-        feedbackByMessageId[messageId] ??
-        historyFeedbackByMessageId[messageId] ??
-        null;
+      const selectedFeedback = getSelectedFeedback(messageId);
       if (selectedFeedback === feedbackType) return;
       feedbackLoadingRef.current = {
         ...feedbackLoadingRef.current,
@@ -345,7 +355,12 @@ export default function ChatWindow({
         [messageId]: feedbackType,
       }));
       try {
-        await updateMessageFeedbackApi(token, messageId, feedbackType);
+        await updateMessageFeedbackApi(
+          token,
+          messageId,
+          feedbackType,
+          feedbackReason
+        );
       } catch (err) {
         setFeedbackByMessageId((prev) => ({
           ...prev,
@@ -363,7 +378,39 @@ export default function ChatWindow({
         }));
       }
     },
-    [feedbackByMessageId, historyFeedbackByMessageId, token]
+    [getSelectedFeedback, token]
+  );
+
+  const closeFeedbackReasonModal = useCallback(() => {
+    setIsFeedbackReasonModalOpen(false);
+    setPendingFeedbackMessageId(null);
+  }, []);
+
+  const handleFeedbackReasonSubmit = useCallback(
+    async (feedbackReason) => {
+      if (!pendingFeedbackMessageId) return;
+      const messageId = pendingFeedbackMessageId;
+      setIsFeedbackReasonModalOpen(false);
+      setPendingFeedbackMessageId(null);
+      await submitFeedback(messageId, "NOT_HELPFUL", feedbackReason);
+    },
+    [pendingFeedbackMessageId, submitFeedback]
+  );
+
+  const handleFeedback = useCallback(
+    (messageId, feedbackType) => {
+      if (!token || !messageId || feedbackLoadingRef.current[messageId]) return;
+      if (getSelectedFeedback(messageId) === feedbackType) return;
+
+      if (feedbackType === "NOT_HELPFUL") {
+        setPendingFeedbackMessageId(messageId);
+        setIsFeedbackReasonModalOpen(true);
+        return;
+      }
+
+      submitFeedback(messageId, feedbackType);
+    },
+    [getSelectedFeedback, submitFeedback, token]
   );
 
   return (
@@ -427,6 +474,13 @@ export default function ChatWindow({
           </div>
         );
       })}
+      {isFeedbackReasonModalOpen && (
+        <FeedbackReasonModal
+          isOpen={isFeedbackReasonModalOpen}
+          onClose={closeFeedbackReasonModal}
+          onSubmit={handleFeedbackReasonSubmit}
+        />
+      )}
       <div ref={bottomRef} />
     </div>
   );

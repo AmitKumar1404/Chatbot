@@ -79,11 +79,19 @@ export async function updateChatSessionPinnedApi(token, sessionId, pinned) {
   return res.json();
 }
 
-export async function updateMessageFeedbackApi(token, messageId, feedbackType) {
+export async function updateMessageFeedbackApi(
+  token,
+  messageId,
+  feedbackType,
+  feedbackReason
+) {
+  const body = { feedbackType };
+  if (feedbackReason) body.feedbackReason = feedbackReason;
+
   const res = await fetch(`${API_BASE_URL}/chat/messages/${messageId}/feedback`, {
     method: "PUT",
     headers: authHeaders(token, true),
-    body: JSON.stringify({ feedbackType }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error("Failed to update message feedback");
   return res.json();
