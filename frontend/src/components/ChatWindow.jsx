@@ -340,17 +340,17 @@ export default function ChatWindow({
         ...prev,
         [messageId]: true,
       }));
+      setFeedbackByMessageId((prev) => ({
+        ...prev,
+        [messageId]: feedbackType,
+      }));
       try {
-        const updated = await updateMessageFeedbackApi(
-          token,
-          messageId,
-          feedbackType
-        );
+        await updateMessageFeedbackApi(token, messageId, feedbackType);
+      } catch (err) {
         setFeedbackByMessageId((prev) => ({
           ...prev,
-          [messageId]: updated.feedbackType,
+          [messageId]: selectedFeedback,
         }));
-      } catch (err) {
         console.error("Feedback failed", err);
       } finally {
         feedbackLoadingRef.current = {
