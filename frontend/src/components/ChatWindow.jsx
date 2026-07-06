@@ -327,6 +327,11 @@ export default function ChatWindow({
   const handleFeedback = useCallback(
     async (messageId, feedbackType) => {
       if (!token || !messageId || feedbackLoadingRef.current[messageId]) return;
+      const selectedFeedback =
+        feedbackByMessageId[messageId] ??
+        historyFeedbackByMessageId[messageId] ??
+        null;
+      if (selectedFeedback === feedbackType) return;
       feedbackLoadingRef.current = {
         ...feedbackLoadingRef.current,
         [messageId]: true,
@@ -358,7 +363,7 @@ export default function ChatWindow({
         }));
       }
     },
-    [token]
+    [feedbackByMessageId, historyFeedbackByMessageId, token]
   );
 
   return (
