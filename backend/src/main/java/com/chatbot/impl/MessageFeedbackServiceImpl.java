@@ -2,6 +2,7 @@ package com.chatbot.impl;
 
 import com.chatbot.dto.MessageFeedbackRequest;
 import com.chatbot.dto.MessageFeedbackResponse;
+import com.chatbot.model.FeedbackReason;
 import com.chatbot.model.Message;
 import com.chatbot.model.MessageFeedback;
 import com.chatbot.model.MessageFeedbackType;
@@ -56,12 +57,16 @@ public class MessageFeedbackServiceImpl implements MessageFeedbackService {
         }
 
         MessageFeedbackType feedbackType = request.getFeedbackType();
+        FeedbackReason feedbackReason = feedbackType == MessageFeedbackType.NOT_HELPFUL
+                ? request.getFeedbackReason()
+                : null;
         Instant now = Instant.now();
 
         MessageFeedback feedback = messageFeedbackRepository
                 .findByMessage_IdAndUser_Id(messageId, user.getId())
                 .map(existing -> {
                     existing.setFeedbackType(feedbackType);
+                    existing.setFeedbackReason(feedbackReason);
                     existing.setUpdatedAt(now);
                     return existing;
                 })
@@ -69,6 +74,7 @@ public class MessageFeedbackServiceImpl implements MessageFeedbackService {
                         .message(message)
                         .user(user)
                         .feedbackType(feedbackType)
+                        .feedbackReason(feedbackReason)
                         .createdAt(now)
                         .updatedAt(now)
                         .build());
