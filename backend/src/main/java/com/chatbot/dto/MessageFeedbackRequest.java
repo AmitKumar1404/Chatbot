@@ -1,5 +1,6 @@
 package com.chatbot.dto;
 
+import com.chatbot.model.FeedbackReason;
 import com.chatbot.model.MessageFeedbackType;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -15,4 +16,6 @@ public class MessageFeedbackRequest {
 
     @NotNull
     private MessageFeedbackType feedbackType;
+
+    private FeedbackReason feedbackReason;
 }

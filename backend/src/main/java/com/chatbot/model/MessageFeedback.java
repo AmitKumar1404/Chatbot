@@ -54,6 +54,10 @@ public class MessageFeedback {
     @Column(name = "feedback_type", nullable = false, length = 20)
     private MessageFeedbackType feedbackType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "feedback_reason", length = 30)
+    private FeedbackReason feedbackReason;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
