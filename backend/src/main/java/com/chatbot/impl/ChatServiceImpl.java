@@ -1,12 +1,16 @@
 package com.chatbot.impl;
 
+import com.chatbot.dto.ChatMessageResponse;
 import com.chatbot.dto.ChatRequest;
 import com.chatbot.dto.ChatResponse;
 import com.chatbot.dto.ChatStompPayload;
 import com.chatbot.model.ChatSession;
 import com.chatbot.model.Message;
+import com.chatbot.model.MessageFeedback;
+import com.chatbot.model.MessageFeedbackType;
 import com.chatbot.model.User;
 import com.chatbot.repository.ChatSessionRepository;
+import com.chatbot.repository.MessageFeedbackRepository;
 import com.chatbot.repository.MessageRepository;
 import com.chatbot.repository.UserRepository;
 import com.chatbot.service.AIService;
@@ -21,7 +25,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static com.chatbot.constant.AppConstants.NEW_CHAT_TITLE;
 import static com.chatbot.constant.AppConstants.NOT_AUTHENTICATED;
@@ -33,6 +39,7 @@ public class ChatServiceImpl implements ChatService {
 
     private final ChatSessionRepository chatSessionRepository;
     private final MessageRepository messageRepository;
+    private final MessageFeedbackRepository messageFeedbackRepository;
     private final UserRepository userRepository;
     private final AIService aiService;
     private final TransactionTemplate transactionTemplate;
@@ -40,11 +47,13 @@ public class ChatServiceImpl implements ChatService {
     public ChatServiceImpl(
             ChatSessionRepository chatSessionRepository,
             MessageRepository messageRepository,
+            MessageFeedbackRepository messageFeedbackRepository,
             UserRepository userRepository,
             AIService aiService,
             TransactionTemplate transactionTemplate) {
         this.chatSessionRepository = chatSessionRepository;
         this.messageRepository = messageRepository;
+        this.messageFeedbackRepository = messageFeedbackRepository;
         this.userRepository = userRepository;
         this.aiService = aiService;
         this.transactionTemplate = transactionTemplate;
@@ -84,23 +93,25 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Message> getMessages(Long sessionId) {
+    public List<ChatMessageResponse> getMessages(Long sessionId) {
         User user = resolveCurrentUser();
         chatSessionRepository.findByIdAndUser_Id(sessionId, user.getId())
                 .orElseThrow(() -> new RuntimeException(SESSION_NOT_FOUND));
-        return messageRepository.findByChatSession_IdOrderByTimestampAsc(sessionId);
+        List<Message> messages = messageRepository.findByChatSession_IdOrderByTimestampAsc(sessionId);
+        return withFeedback(messages, user.getId());
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<Message> getMessages(Long sessionId, int page, int size) {
+    public List<ChatMessageResponse> getMessages(Long sessionId, int page, int size) {
         User user = resolveCurrentUser();
         chatSessionRepository.findByIdAndUser_Id(sessionId, user.getId())
                 .orElseThrow(() -> new RuntimeException(SESSION_NOT_FOUND));
-        return messageRepository.findPageByChatSessionId(
+        List<Message> messages = messageRepository.findPageByChatSessionId(
                 sessionId,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "timestamp"))
         ).getContent();
+        return withFeedback(messages, user.getId());
     }
 
     @Override
@@ -311,6 +322,35 @@ public class ChatServiceImpl implements ChatService {
             }
         }
         return Optional.empty();
+    }
+
+    private List<ChatMessageResponse> withFeedback(List<Message> messages, Long userId) {
+        if (messages.isEmpty()) {
+            return List.of();
+        }
+        List<Long> messageIds = messages.stream()
+                .map(Message::getId)
+                .toList();
+        Map<Long, MessageFeedbackType> feedbackByMessageId = messageFeedbackRepository
+                .findByUser_IdAndMessage_IdIn(userId, messageIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        feedback -> feedback.getMessage().getId(),
+                        MessageFeedback::getFeedbackType
+                ));
+
+        return messages.stream()
+                .map(message -> ChatMessageResponse.builder()
+                        .id(message.getId())
+                        .userMessage(message.getUserMessage())
+                        .aiResponse(message.getAiResponse())
+                        .timestamp(message.getTimestamp())
+                        .userBubbleClientId(message.getUserBubbleClientId())
+                        .assistantBubbleClientId(message.getAssistantBubbleClientId())
+                        .generationComplete(message.isGenerationComplete())
+                        .feedbackType(feedbackByMessageId.get(message.getId()))
+                        .build())
+                .toList();
     }
 
     private void maybeRefreshSessionTitle(ChatSession session, String userContent) {
