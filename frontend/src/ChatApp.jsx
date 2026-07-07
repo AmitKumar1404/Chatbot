@@ -114,6 +114,7 @@ function mapDbMessageToUi(m, options = {}) {
       editing: false,
       streaming: assistantStreaming,
       sourceMessageId: m.id,
+      feedbackType: m.feedbackType ?? null,
     },
   ];
 }

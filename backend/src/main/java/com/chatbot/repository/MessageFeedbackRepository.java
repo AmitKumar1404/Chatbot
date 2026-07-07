@@ -1,0 +1,19 @@
+package com.chatbot.repository;
+
+import com.chatbot.model.MessageFeedback;
+import com.chatbot.model.MessageFeedbackType;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface MessageFeedbackRepository extends JpaRepository<MessageFeedback, Long> {
+
+    Optional<MessageFeedback> findByMessage_IdAndUser_Id(Long messageId, Long userId);
+
+    boolean existsByMessage_IdAndUser_Id(Long messageId, Long userId);
+
+    List<MessageFeedback> findByUser_IdAndMessage_IdIn(Long userId, List<Long> messageIds);
+
+    long countByFeedbackType(MessageFeedbackType feedbackType);
+}

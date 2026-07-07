@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState, memo, useCallback } from "react";
+import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import { Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { updateMessageFeedbackApi } from "../chatApi";
+import { useAuth } from "../context/AuthContext";
+import FeedbackButtons from "./FeedbackButtons";
+import FeedbackReasonModal from "./FeedbackReasonModal";
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -107,6 +111,9 @@ const AssistantBubble = memo(function AssistantBubble({
   renderedContent,
   shouldRenderPlainText,
   isSearchMatch,
+  selectedFeedback,
+  feedbackLoading,
+  onFeedback,
 }) {
   if (msg.streaming && !(msg.content ?? "").trim()) {
     return (
@@ -160,6 +167,13 @@ const AssistantBubble = memo(function AssistantBubble({
               <Copy size={16} strokeWidth={2} />
             )}
           </button>
+          {msg.sourceMessageId && (
+            <FeedbackButtons
+              selectedFeedback={selectedFeedback}
+              loading={feedbackLoading}
+              onFeedback={onFeedback}
+            />
+          )}
         </div>
       )}
     </div>
@@ -172,6 +186,7 @@ export default function ChatWindow({
   onEditSave,
   searchMatch = null,
 }) {
+  const { token } = useAuth();
   const bottomRef = useRef(null);
   const scrollRootRef = useRef(null);
   const stickToBottomRef = useRef(true);
@@ -180,6 +195,24 @@ export default function ChatWindow({
   const [editingUserId, setEditingUserId] = useState(null);
   const [draft, setDraft] = useState("");
   const [copiedId, setCopiedId] = useState(null);
+  const [feedbackByMessageId, setFeedbackByMessageId] = useState({});
+  const [feedbackLoadingByMessageId, setFeedbackLoadingByMessageId] = useState(
+    {}
+  );
+  const [isFeedbackReasonModalOpen, setIsFeedbackReasonModalOpen] =
+    useState(false);
+  const [pendingFeedbackMessageId, setPendingFeedbackMessageId] =
+    useState(null);
+  const feedbackLoadingRef = useRef({});
+  const historyFeedbackByMessageId = useMemo(() => {
+    const feedback = {};
+    messages.forEach((msg) => {
+      if (msg.role === "assistant" && msg.sourceMessageId && msg.feedbackType) {
+        feedback[msg.sourceMessageId] = msg.feedbackType;
+      }
+    });
+    return feedback;
+  }, [messages]);
 
   // ===============================
   // 📋 COPY FUNCTION (NEW ADDITION)
@@ -296,6 +329,90 @@ export default function ChatWindow({
     [draft, onEditSave]
   );
 
+  const getSelectedFeedback = useCallback(
+    (messageId) =>
+      feedbackByMessageId[messageId] ??
+      historyFeedbackByMessageId[messageId] ??
+      null,
+    [feedbackByMessageId, historyFeedbackByMessageId]
+  );
+
+  const submitFeedback = useCallback(
+    async (messageId, feedbackType, feedbackReason) => {
+      if (!token || !messageId || feedbackLoadingRef.current[messageId]) return;
+      const selectedFeedback = getSelectedFeedback(messageId);
+      if (selectedFeedback === feedbackType) return;
+      feedbackLoadingRef.current = {
+        ...feedbackLoadingRef.current,
+        [messageId]: true,
+      };
+      setFeedbackLoadingByMessageId((prev) => ({
+        ...prev,
+        [messageId]: true,
+      }));
+      setFeedbackByMessageId((prev) => ({
+        ...prev,
+        [messageId]: feedbackType,
+      }));
+      try {
+        await updateMessageFeedbackApi(
+          token,
+          messageId,
+          feedbackType,
+          feedbackReason
+        );
+      } catch (err) {
+        setFeedbackByMessageId((prev) => ({
+          ...prev,
+          [messageId]: selectedFeedback,
+        }));
+        console.error("Feedback failed", err);
+      } finally {
+        feedbackLoadingRef.current = {
+          ...feedbackLoadingRef.current,
+          [messageId]: false,
+        };
+        setFeedbackLoadingByMessageId((prev) => ({
+          ...prev,
+          [messageId]: false,
+        }));
+      }
+    },
+    [getSelectedFeedback, token]
+  );
+
+  const closeFeedbackReasonModal = useCallback(() => {
+    setIsFeedbackReasonModalOpen(false);
+    setPendingFeedbackMessageId(null);
+  }, []);
+
+  const handleFeedbackReasonSubmit = useCallback(
+    async (feedbackReason) => {
+      if (!pendingFeedbackMessageId) return;
+      const messageId = pendingFeedbackMessageId;
+      setIsFeedbackReasonModalOpen(false);
+      setPendingFeedbackMessageId(null);
+      await submitFeedback(messageId, "NOT_HELPFUL", feedbackReason);
+    },
+    [pendingFeedbackMessageId, submitFeedback]
+  );
+
+  const handleFeedback = useCallback(
+    (messageId, feedbackType) => {
+      if (!token || !messageId || feedbackLoadingRef.current[messageId]) return;
+      if (getSelectedFeedback(messageId) === feedbackType) return;
+
+      if (feedbackType === "NOT_HELPFUL") {
+        setPendingFeedbackMessageId(messageId);
+        setIsFeedbackReasonModalOpen(true);
+        return;
+      }
+
+      submitFeedback(messageId, feedbackType);
+    },
+    [getSelectedFeedback, submitFeedback, token]
+  );
+
   return (
     <div ref={scrollRootRef} className="chat-window">
       {messages.length === 0 && (
@@ -342,10 +459,28 @@ export default function ChatWindow({
               renderedContent={renderedContent}
               shouldRenderPlainText={shouldRenderAssistantAsPlainText}
               isSearchMatch={isSearchMatch}
+              selectedFeedback={
+                feedbackByMessageId[msg.sourceMessageId] ??
+                historyFeedbackByMessageId[msg.sourceMessageId] ??
+                null
+              }
+              feedbackLoading={
+                feedbackLoadingByMessageId[msg.sourceMessageId] === true
+              }
+              onFeedback={(feedbackType) =>
+                handleFeedback(msg.sourceMessageId, feedbackType)
+              }
             />
           </div>
         );
       })}
+      {isFeedbackReasonModalOpen && (
+        <FeedbackReasonModal
+          isOpen={isFeedbackReasonModalOpen}
+          onClose={closeFeedbackReasonModal}
+          onSubmit={handleFeedbackReasonSubmit}
+        />
+      )}
       <div ref={bottomRef} />
     </div>
   );
