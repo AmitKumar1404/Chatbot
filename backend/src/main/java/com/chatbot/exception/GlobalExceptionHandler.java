@@ -2,7 +2,9 @@ package com.chatbot.exception;
 
 import com.chatbot.constant.ResponseCode;
 import com.chatbot.dto.ErrorResponse;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -43,6 +45,27 @@ public class GlobalExceptionHandler {
                 .timestamp(Instant.now())
                 .build();
         return ResponseEntity.status(ResponseCode.BAD_REQUEST).body(body);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableMessage(HttpMessageNotReadableException ex) {
+        String message = isInvalidFeedbackReason(ex)
+                ? "feedbackReason must be one of: INCORRECT, INCOMPLETE, HALLUCINATION, OFFENSIVE, OTHER"
+                : "Invalid request body";
+        ErrorResponse body = ErrorResponse.builder()
+                .message(message)
+                .status(ResponseCode.BAD_REQUEST)
+                .timestamp(Instant.now())
+                .build();
+        return ResponseEntity.status(ResponseCode.BAD_REQUEST).body(body);
+    }
+
+    private boolean isInvalidFeedbackReason(HttpMessageNotReadableException ex) {
+        if (!(ex.getCause() instanceof InvalidFormatException invalidFormatException)) {
+            return false;
+        }
+        return invalidFormatException.getPath().stream()
+                .anyMatch(reference -> "feedbackReason".equals(reference.getFieldName()));
     }
 
     @ExceptionHandler(Exception.class)

@@ -1,5 +1,6 @@
 package com.chatbot.dto;
 
+import com.chatbot.model.FeedbackReason;
 import com.chatbot.model.MessageFeedbackType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -22,4 +23,5 @@ public class ChatMessageResponse {
     private String assistantBubbleClientId;
     private boolean generationComplete;
     private MessageFeedbackType feedbackType;
+    private FeedbackReason feedbackReason;
 }

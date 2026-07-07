@@ -7,7 +7,6 @@ import com.chatbot.dto.ChatStompPayload;
 import com.chatbot.model.ChatSession;
 import com.chatbot.model.Message;
 import com.chatbot.model.MessageFeedback;
-import com.chatbot.model.MessageFeedbackType;
 import com.chatbot.model.User;
 import com.chatbot.repository.ChatSessionRepository;
 import com.chatbot.repository.MessageFeedbackRepository;
@@ -331,12 +330,12 @@ public class ChatServiceImpl implements ChatService {
         List<Long> messageIds = messages.stream()
                 .map(Message::getId)
                 .toList();
-        Map<Long, MessageFeedbackType> feedbackByMessageId = messageFeedbackRepository
+        Map<Long, MessageFeedback> feedbackByMessageId = messageFeedbackRepository
                 .findByUser_IdAndMessage_IdIn(userId, messageIds)
                 .stream()
                 .collect(Collectors.toMap(
                         feedback -> feedback.getMessage().getId(),
-                        MessageFeedback::getFeedbackType
+                        feedback -> feedback
                 ));
 
         return messages.stream()
@@ -348,7 +347,12 @@ public class ChatServiceImpl implements ChatService {
                         .userBubbleClientId(message.getUserBubbleClientId())
                         .assistantBubbleClientId(message.getAssistantBubbleClientId())
                         .generationComplete(message.isGenerationComplete())
-                        .feedbackType(feedbackByMessageId.get(message.getId()))
+                        .feedbackType(feedbackByMessageId.get(message.getId()) == null
+                                ? null
+                                : feedbackByMessageId.get(message.getId()).getFeedbackType())
+                        .feedbackReason(feedbackByMessageId.get(message.getId()) == null
+                                ? null
+                                : feedbackByMessageId.get(message.getId()).getFeedbackReason())
                         .build())
                 .toList();
     }

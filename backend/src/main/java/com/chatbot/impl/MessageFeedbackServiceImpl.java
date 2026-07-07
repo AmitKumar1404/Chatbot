@@ -27,6 +27,7 @@ public class MessageFeedbackServiceImpl implements MessageFeedbackService {
     private static final String MESSAGE_NOT_FOUND = "Message not found";
     private static final String MESSAGE_NOT_OWNED = "Message does not belong to current user";
     private static final String MESSAGE_INCOMPLETE = "Cannot provide feedback before message generation is complete";
+    private static final String FEEDBACK_REASON_REQUIRED = "feedbackReason is required for NOT_HELPFUL feedback";
 
     private final MessageFeedbackRepository messageFeedbackRepository;
     private final MessageRepository messageRepository;
@@ -57,6 +58,9 @@ public class MessageFeedbackServiceImpl implements MessageFeedbackService {
         }
 
         MessageFeedbackType feedbackType = request.getFeedbackType();
+        if (feedbackType == MessageFeedbackType.NOT_HELPFUL && request.getFeedbackReason() == null) {
+            throw new RuntimeException(FEEDBACK_REASON_REQUIRED);
+        }
         FeedbackReason feedbackReason = feedbackType == MessageFeedbackType.NOT_HELPFUL
                 ? request.getFeedbackReason()
                 : null;

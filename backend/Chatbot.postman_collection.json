@@ -627,6 +627,58 @@
 						},
 						"description": "GET /chat/stream/active (served at /api/v1/chat/stream/active)"
 					}
+				},
+				{
+					"name": "Update session pin",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pinned\": true\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/chat/sessions/:sessionId/pin",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"chat",
+								"sessions",
+								":sessionId",
+								"pin"
+							],
+							"query": [],
+							"variable": [
+								{
+									"key": "sessionId",
+									"value": "1",
+									"description": "Path variable — Long sessionId"
+								}
+							]
+						},
+						"description": "PATCH /chat/sessions/{sessionId}/pin (served at /api/v1/chat/sessions/{sessionId}/pin)"
+					}
 				}
 			]
 		},
@@ -665,6 +717,98 @@
 							]
 						},
 						"description": "GET /search?q={keyword} (served at /api/v1/search)"
+					}
+				}
+			]
+		},
+		{
+			"name": "Feedback",
+			"item": [
+				{
+					"name": "Update message feedback",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedbackType\": \"NOT_HELPFUL\",\n  \"feedbackReason\": \"INCORRECT\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/chat/messages/:messageId/feedback",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"chat",
+								"messages",
+								":messageId",
+								"feedback"
+							],
+							"query": [],
+							"variable": [
+								{
+									"key": "messageId",
+									"value": "1",
+									"description": "Path variable — Long messageId"
+								}
+							]
+						},
+						"description": "PUT /chat/messages/{messageId}/feedback (served at /api/v1/chat/messages/{messageId}/feedback)\n\nHelpful body:\n```json\n{\n  \"feedbackType\": \"HELPFUL\"\n}\n```\n\nNot helpful body:\n```json\n{\n  \"feedbackType\": \"NOT_HELPFUL\",\n  \"feedbackReason\": \"INCORRECT\"\n}\n```"
+					}
+				}
+			]
+		},
+		{
+			"name": "Admin",
+			"item": [
+				{
+					"name": "Get feedback stats",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/feedback/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "9999",
+							"path": [
+								"api",
+								"v1",
+								"admin",
+								"feedback",
+								"stats"
+							],
+							"query": []
+						},
+						"description": "GET /api/v1/admin/feedback/stats (served at /api/v1/admin/feedback/stats)"
 					}
 				}
 			]

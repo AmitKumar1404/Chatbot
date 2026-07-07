@@ -196,6 +196,9 @@ export default function ChatWindow({
   const [draft, setDraft] = useState("");
   const [copiedId, setCopiedId] = useState(null);
   const [feedbackByMessageId, setFeedbackByMessageId] = useState({});
+  const [feedbackReasonByMessageId, setFeedbackReasonByMessageId] = useState(
+    {}
+  );
   const [feedbackLoadingByMessageId, setFeedbackLoadingByMessageId] = useState(
     {}
   );
@@ -212,6 +215,15 @@ export default function ChatWindow({
       }
     });
     return feedback;
+  }, [messages]);
+  const historyFeedbackReasonByMessageId = useMemo(() => {
+    const feedbackReasons = {};
+    messages.forEach((msg) => {
+      if (msg.role === "assistant" && msg.sourceMessageId && msg.feedbackReason) {
+        feedbackReasons[msg.sourceMessageId] = msg.feedbackReason;
+      }
+    });
+    return feedbackReasons;
   }, [messages]);
 
   // ===============================
@@ -341,6 +353,10 @@ export default function ChatWindow({
     async (messageId, feedbackType, feedbackReason) => {
       if (!token || !messageId || feedbackLoadingRef.current[messageId]) return;
       const selectedFeedback = getSelectedFeedback(messageId);
+      const selectedFeedbackReason =
+        feedbackReasonByMessageId[messageId] ??
+        historyFeedbackReasonByMessageId[messageId] ??
+        null;
       if (selectedFeedback === feedbackType) return;
       feedbackLoadingRef.current = {
         ...feedbackLoadingRef.current,
@@ -354,6 +370,10 @@ export default function ChatWindow({
         ...prev,
         [messageId]: feedbackType,
       }));
+      setFeedbackReasonByMessageId((prev) => ({
+        ...prev,
+        [messageId]: feedbackType === "NOT_HELPFUL" ? feedbackReason : null,
+      }));
       try {
         await updateMessageFeedbackApi(
           token,
@@ -365,6 +385,10 @@ export default function ChatWindow({
         setFeedbackByMessageId((prev) => ({
           ...prev,
           [messageId]: selectedFeedback,
+        }));
+        setFeedbackReasonByMessageId((prev) => ({
+          ...prev,
+          [messageId]: selectedFeedbackReason,
         }));
         console.error("Feedback failed", err);
       } finally {
@@ -378,7 +402,7 @@ export default function ChatWindow({
         }));
       }
     },
-    [getSelectedFeedback, token]
+    [feedbackReasonByMessageId, getSelectedFeedback, historyFeedbackReasonByMessageId, token]
   );
 
   const closeFeedbackReasonModal = useCallback(() => {
