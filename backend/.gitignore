@@ -41,3 +41,6 @@ build/
 !.env.*.example
 !*.env.example
 !*.env.*.example
+
+# Uploaded documents
+uploads/
