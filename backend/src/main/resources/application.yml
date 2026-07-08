@@ -7,6 +7,12 @@ spring:
   config:
     import: optional:file:.env[.properties]
 
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 25MB
+      max-request-size: 25MB
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -97,3 +103,6 @@ info:
     name: Chatbot Backend
     version: 1.0.0
     description: ChatGPT-like AI chatbot backend
+
+file:
+  upload-dir: uploads

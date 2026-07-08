@@ -42,4 +42,6 @@ public final class AppConstants {
     public static final String AUTH_RESPONSE_TOKEN_FIELD = "token";
     public static final String AUTH_RESPONSE_USERNAME_FIELD = "username";
     public static final String AUTH_RESPONSE_REFRESH_TOKEN_FIELD = "refreshToken";
+
+    public static final String DOCUMENT_BASE_PATH = "/api/documents";
 }
