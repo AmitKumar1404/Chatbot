@@ -6,6 +6,7 @@ import com.chatbot.model.User;
 import com.chatbot.repository.DocumentRepository;
 import com.chatbot.repository.UserRepository;
 import com.chatbot.service.DocumentService;
+import com.chatbot.service.pdf.PdfTextExtractor;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -32,13 +33,16 @@ public class DocumentServiceImpl implements DocumentService {
 
     private final DocumentRepository documentRepository;
     private final UserRepository userRepository;
+    private final PdfTextExtractor pdfTextExtractor;
 
     public DocumentServiceImpl(
             DocumentRepository documentRepository,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            PdfTextExtractor pdfTextExtractor) {
 
         this.documentRepository = documentRepository;
         this.userRepository = userRepository;
+        this.pdfTextExtractor = pdfTextExtractor;
     }
 
     @Override
@@ -99,7 +103,17 @@ public class DocumentServiceImpl implements DocumentService {
                     StandardCopyOption.REPLACE_EXISTING
             );
 
-            // 10. Save metadata in database
+            // 10. Extract PDF text
+            String extractedText =
+                    pdfTextExtractor.extractText(destination.toFile());
+
+            System.out.println();
+            System.out.println("========== PDF TEXT ==========");
+            System.out.println(extractedText);
+            System.out.println("======== END OF PDF ==========");
+            System.out.println();
+
+            // 11. Save metadata in database
             Document document = Document.builder()
                     .fileName(originalFileName)
                     .storedFileName(storedFileName)
@@ -112,7 +126,7 @@ public class DocumentServiceImpl implements DocumentService {
 
             Document savedDocument = documentRepository.save(document);
 
-            // 11. Return response
+            // 12. Return response
             return DocumentUploadResponse.builder()
                     .id(savedDocument.getId())
                     .fileName(savedDocument.getFileName())
