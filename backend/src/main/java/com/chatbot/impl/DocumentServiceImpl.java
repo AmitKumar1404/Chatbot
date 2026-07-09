@@ -24,6 +24,10 @@ import java.util.UUID;
 
 import com.chatbot.service.chunk.TextChunkService;
 import java.util.List;
+import com.chatbot.model.DocumentChunk;
+import com.chatbot.repository.DocumentChunkRepository;
+
+import java.util.ArrayList;
 
 @Service
 public class DocumentServiceImpl implements DocumentService {
@@ -38,17 +42,20 @@ public class DocumentServiceImpl implements DocumentService {
     private final UserRepository userRepository;
     private final PdfTextExtractor pdfTextExtractor;
     private final TextChunkService textChunkService;
+    private final DocumentChunkRepository documentChunkRepository;
 
     public DocumentServiceImpl(
             DocumentRepository documentRepository,
             UserRepository userRepository,
             PdfTextExtractor pdfTextExtractor,
-            TextChunkService textChunkService) {
+            TextChunkService textChunkService,
+            DocumentChunkRepository documentChunkRepository) {
 
         this.documentRepository = documentRepository;
         this.userRepository = userRepository;
         this.pdfTextExtractor = pdfTextExtractor;
         this.textChunkService = textChunkService;
+        this.documentChunkRepository = documentChunkRepository;
     }
 
     @Override
@@ -148,6 +155,20 @@ public class DocumentServiceImpl implements DocumentService {
                     .build();
 
             Document savedDocument = documentRepository.save(document);
+            List<DocumentChunk> documentChunks = new ArrayList<>();
+
+            for (int i = 0; i < chunks.size(); i++) {
+
+                DocumentChunk chunk = DocumentChunk.builder()
+                        .document(savedDocument)
+                        .chunkIndex(i)
+                        .content(chunks.get(i))
+                        .build();
+
+                documentChunks.add(chunk);
+            }
+
+            documentChunkRepository.saveAll(documentChunks);
 
             // 13. Return response
             return DocumentUploadResponse.builder()
