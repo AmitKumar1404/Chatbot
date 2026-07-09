@@ -22,6 +22,9 @@ import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
+import com.chatbot.service.chunk.TextChunkService;
+import java.util.List;
+
 @Service
 public class DocumentServiceImpl implements DocumentService {
 
@@ -34,15 +37,18 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentRepository documentRepository;
     private final UserRepository userRepository;
     private final PdfTextExtractor pdfTextExtractor;
+    private final TextChunkService textChunkService;
 
     public DocumentServiceImpl(
             DocumentRepository documentRepository,
             UserRepository userRepository,
-            PdfTextExtractor pdfTextExtractor) {
+            PdfTextExtractor pdfTextExtractor,
+            TextChunkService textChunkService) {
 
         this.documentRepository = documentRepository;
         this.userRepository = userRepository;
         this.pdfTextExtractor = pdfTextExtractor;
+        this.textChunkService = textChunkService;
     }
 
     @Override
@@ -113,7 +119,24 @@ public class DocumentServiceImpl implements DocumentService {
             System.out.println("======== END OF PDF ==========");
             System.out.println();
 
-            // 11. Save metadata in database
+            // 11. Split extracted text into chunks
+            List<String> chunks = textChunkService.chunkText(extractedText);
+
+            System.out.println("==================================");
+            System.out.println("TOTAL CHUNKS : " + chunks.size());
+            System.out.println("==================================");
+
+            for (int i = 0; i < chunks.size(); i++) {
+
+                System.out.println();
+                System.out.println("------------");
+                System.out.println("Chunk " + (i + 1));
+                System.out.println("------------");
+
+                System.out.println(chunks.get(i));
+            }
+
+            // 12. Save metadata in database
             Document document = Document.builder()
                     .fileName(originalFileName)
                     .storedFileName(storedFileName)
@@ -126,7 +149,7 @@ public class DocumentServiceImpl implements DocumentService {
 
             Document savedDocument = documentRepository.save(document);
 
-            // 12. Return response
+            // 13. Return response
             return DocumentUploadResponse.builder()
                     .id(savedDocument.getId())
                     .fileName(savedDocument.getFileName())
