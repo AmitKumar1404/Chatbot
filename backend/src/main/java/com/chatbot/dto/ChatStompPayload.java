@@ -41,6 +41,8 @@ public class ChatStompPayload {
      */
     private Long sessionId;
 
+    private Long documentId;
+
     /**
      * Client id of the user bubble for {@link Type#NEW} (pairs with {@link #messageId} for the assistant).
      */
@@ -93,6 +95,14 @@ public class ChatStompPayload {
 
     public void setSessionId(Long sessionId) {
         this.sessionId = sessionId;
+    }
+
+    public Long getDocumentId(){
+        return documentId;
+    }
+
+    public void setDocumentId(Long documentId){
+        this.documentId = documentId;
     }
 
     public String getUserMessageId() {

@@ -43,4 +43,7 @@ public class Document {
 
     @Column(nullable = false)
     private String status;
+
+    @Column(name = "file_hash", unique = true, nullable = false)
+    private String fileHash;
 }
