@@ -26,8 +26,15 @@ import com.chatbot.service.chunk.TextChunkService;
 import java.util.List;
 import com.chatbot.model.DocumentChunk;
 import com.chatbot.repository.DocumentChunkRepository;
-
+import com.chatbot.service.embedding.EmbeddingService;
 import java.util.ArrayList;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
+import com.chatbot.model.DocumentChunkEmbedding;
+import com.chatbot.repository.DocumentChunkEmbeddingRepository;
+
+import java.util.Optional;
 
 @Service
 public class DocumentServiceImpl implements DocumentService {
@@ -43,19 +50,25 @@ public class DocumentServiceImpl implements DocumentService {
     private final PdfTextExtractor pdfTextExtractor;
     private final TextChunkService textChunkService;
     private final DocumentChunkRepository documentChunkRepository;
+    private final EmbeddingService embeddingService;
+    private final DocumentChunkEmbeddingRepository documentChunkEmbeddingRepository;
 
     public DocumentServiceImpl(
             DocumentRepository documentRepository,
             UserRepository userRepository,
             PdfTextExtractor pdfTextExtractor,
             TextChunkService textChunkService,
-            DocumentChunkRepository documentChunkRepository) {
+            DocumentChunkRepository documentChunkRepository,
+            EmbeddingService embeddingService,
+            DocumentChunkEmbeddingRepository documentChunkEmbeddingRepository) {
 
         this.documentRepository = documentRepository;
         this.userRepository = userRepository;
         this.pdfTextExtractor = pdfTextExtractor;
         this.textChunkService = textChunkService;
         this.documentChunkRepository = documentChunkRepository;
+        this.embeddingService = embeddingService;
+        this.documentChunkEmbeddingRepository = documentChunkEmbeddingRepository;
     }
 
     @Override
@@ -89,10 +102,27 @@ public class DocumentServiceImpl implements DocumentService {
             throw new RuntimeException("Maximum allowed file size is 25 MB.");
         }
 
-        // 5. Fetch logged-in user
+        // 5. Generate SHA-256 hash
+        String fileHash = calculateSha256(file);
+
+        // 6. Check duplicate document
+        if (documentRepository.findByFileHash(fileHash).isPresent()) {
+
+            throw new RuntimeException("This document has already been uploaded.");
+        }
+
+        // 7. Fetch logged-in user
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() ->
                         new NoSuchElementException("User not found."));
+
+        // 5.1 Check duplicate document
+//        Optional<Document> existingDocument =
+//                documentRepository.findByFileName(originalFileName);
+//
+//        if (existingDocument.isPresent()) {
+//            throw new RuntimeException("Document already uploaded.");
+//        }
 
         // 6. Create upload directory
         Path uploadPath = Paths.get(uploadDir);
@@ -149,26 +179,43 @@ public class DocumentServiceImpl implements DocumentService {
                     .storedFileName(storedFileName)
                     .contentType(file.getContentType())
                     .fileSize(file.getSize())
+                    .fileHash(fileHash)
                     .uploadedBy(user)
                     .uploadedAt(LocalDateTime.now())
                     .status("UPLOADED")
                     .build();
 
             Document savedDocument = documentRepository.save(document);
-            List<DocumentChunk> documentChunks = new ArrayList<>();
 
             for (int i = 0; i < chunks.size(); i++) {
 
-                DocumentChunk chunk = DocumentChunk.builder()
-                        .document(savedDocument)
-                        .chunkIndex(i)
-                        .content(chunks.get(i))
-                        .build();
+                String chunkText = chunks.get(i);
 
-                documentChunks.add(chunk);
+                // Generate embedding
+                List<Float> embedding =
+                        embeddingService.generateEmbedding(chunkText);
+
+                System.out.println();
+                System.out.println("Embedding generated for Chunk " + (i + 1));
+                System.out.println("Vector Size : " + embedding.size());
+
+                // Save chunk
+                DocumentChunk savedChunk = documentChunkRepository.save(
+                        DocumentChunk.builder()
+                                .document(savedDocument)
+                                .chunkIndex(i)
+                                .content(chunkText)
+                                .createdAt(LocalDateTime.now())
+                                .build()
+                );
+                documentChunkEmbeddingRepository.save(
+                        DocumentChunkEmbedding.builder()
+                                .chunk(savedChunk)
+                                .embedding(embedding)
+                                .createdAt(LocalDateTime.now())
+                                .build()
+                );
             }
-
-            documentChunkRepository.saveAll(documentChunks);
 
             // 13. Return response
             return DocumentUploadResponse.builder()
@@ -182,6 +229,30 @@ public class DocumentServiceImpl implements DocumentService {
 
             throw new RuntimeException(
                     "Failed to save uploaded file.",
+                    e
+            );
+        }
+    }
+    private String calculateSha256(MultipartFile file) {
+
+        try {
+
+            MessageDigest messageDigest = MessageDigest.getInstance("SHA-256");
+
+            byte[] hashBytes = messageDigest.digest(file.getBytes());
+
+            StringBuilder hexString = new StringBuilder();
+
+            for (byte b : hashBytes) {
+                hexString.append(String.format("%02x", b));
+            }
+
+            return hexString.toString();
+
+        } catch (IOException | NoSuchAlgorithmException e) {
+
+            throw new RuntimeException(
+                    "Failed to generate file hash.",
                     e
             );
         }

@@ -18,6 +18,7 @@ import {
   updateChatSessionTitleApi,
   updateChatSessionPinnedApi,
   searchChatsApi,
+  uploadDocumentApi,
 } from "./chatApi";
 import "./App.css";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
@@ -253,6 +254,7 @@ export default function ChatApp() {
   const [searchedQuery, setSearchedQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [openedSearchMatch, setOpenedSearchMatch] = useState(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState(null);
 
   const [isDesktopViewport, setIsDesktopViewport] = useState(
     getInitialIsDesktopViewport
@@ -279,6 +281,7 @@ export default function ChatApp() {
   const streamTypeRef = useRef("NEW");
   const streamUserMessageIdRef = useRef(null);
   const streamEditTargetRef = useRef(null);
+  const selectedDocumentIdRef = useRef(null);
   const resumeAttemptedForStreamIdRef = useRef(null);
   const streamReplayPrefixRef = useRef(null);
   const streamReplayCursorRef = useRef(0);
@@ -291,6 +294,15 @@ export default function ChatApp() {
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
+
+  useEffect(() => {
+    selectedDocumentIdRef.current = selectedDocumentId;
+  }, [selectedDocumentId]);
+
+  useEffect(() => {
+    if (token) return;
+    setSelectedDocumentId(null);
+  }, [token]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -828,6 +840,9 @@ export default function ChatApp() {
         content: user.content ?? "",
         priorMessages,
       };
+      if (selectedDocumentIdRef.current != null) {
+        payload.documentId = selectedDocumentIdRef.current;
+      }
 
       if (type === "EDIT") {
         payload.editTargetMessageId = streamEditTargetRef.current ?? user.id;
@@ -1238,6 +1253,19 @@ export default function ChatApp() {
     ? "Connected"
     : statusText;
 
+  async function handleDocumentUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !token) return;
+
+    try {
+      const response = await uploadDocumentApi(token, file);
+      setSelectedDocumentId(response.id);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   function handleSend(text) {
     if (isStreamingRef.current || !connected || isBrowserOffline) {
       return;
@@ -1315,6 +1343,7 @@ export default function ChatApp() {
       userMessageId,
       content: text,
       priorMessages,
+      documentId: selectedDocumentId,
     });
   }
 
@@ -1392,10 +1421,17 @@ export default function ChatApp() {
         content: trimmed,
         editTargetMessageId: userMessageId,
         priorMessages,
+        documentId: selectedDocumentId,
       });
       return true;
     },
-    [connected, isBrowserOffline, setOwnedStream, setStreamingState]
+    [
+      connected,
+      isBrowserOffline,
+      selectedDocumentId,
+      setOwnedStream,
+      setStreamingState,
+    ]
   );
 
   function stopResponse() {
@@ -1924,6 +1960,11 @@ export default function ChatApp() {
             <h1 className="app-title">Talk To Me</h1>
           </div>
           <div className="header-actions">
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={handleDocumentUpload}
+            />
             <span
               className={`status-badge ${
                 connected && isBrowserOnline ? "online" : "offline"

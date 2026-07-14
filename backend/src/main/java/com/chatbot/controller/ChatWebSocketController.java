@@ -7,6 +7,10 @@ import com.chatbot.service.ActiveStreamRegistry;
 import com.chatbot.service.ChatPromptComposer;
 import com.chatbot.service.ChatService;
 import com.chatbot.service.OllamaStreamingService;
+import com.chatbot.service.rag.ContextBuilderService;
+import com.chatbot.service.rag.PromptBuilderService;
+import com.chatbot.service.similarity.SimilarityService;
+import com.chatbot.repository.DocumentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -23,6 +27,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.chatbot.constant.StreamConstants.ERROR_PREFIX;
 import static com.chatbot.constant.StreamConstants.isTransientStreamingFailure;
+import com.chatbot.model.DocumentChunk;
+import java.util.List;
 
 @Controller
 public class ChatWebSocketController {
@@ -35,15 +41,27 @@ public class ChatWebSocketController {
     private final SimpMessagingTemplate messagingTemplate;
     private final ActiveStreamRegistry activeStreamRegistry;
     private final ChatService chatService;
+    private final SimilarityService similarityService;
+    private final ContextBuilderService contextBuilderService;
+    private final PromptBuilderService promptBuilderService;
+    private final DocumentRepository documentRepository;
 
     public ChatWebSocketController(OllamaStreamingService streamingService,
                                    SimpMessagingTemplate messagingTemplate,
                                    ActiveStreamRegistry activeStreamRegistry,
-                                   ChatService chatService) {
+                                   ChatService chatService,
+                                   SimilarityService similarityService,
+                                   ContextBuilderService contextBuilderService,
+                                   PromptBuilderService promptBuilderService,
+                                   DocumentRepository documentRepository) {
         this.streamingService = streamingService;
         this.messagingTemplate = messagingTemplate;
         this.activeStreamRegistry = activeStreamRegistry;
         this.chatService = chatService;
+        this.similarityService = similarityService;
+        this.contextBuilderService = contextBuilderService;
+        this.promptBuilderService = promptBuilderService;
+        this.documentRepository = documentRepository;
     }
 
     /**
@@ -89,6 +107,47 @@ public class ChatWebSocketController {
             return;
         }
 
+        final String assistantBubbleId = payload.getMessageId();
+
+        if (payload.getDocumentId() == null) {
+
+            sendJsonToUser(
+                    userName,
+                    StreamDownstreamEvent.error(
+                            outboundClientStreamId,
+                            assistantBubbleId,
+                            ERROR_PREFIX + "Please upload a document first."
+                    )
+            );
+
+            sendJsonToUser(
+                    userName,
+                    StreamDownstreamEvent.done(
+                            outboundClientStreamId,
+                            assistantBubbleId
+                    )
+            );
+
+            return;
+        }
+        if (!documentRepository.existsByIdAndUploadedBy_Username(payload.getDocumentId(), userName)) {
+            sendJsonToUser(
+                    userName,
+                    StreamDownstreamEvent.error(
+                            outboundClientStreamId,
+                            assistantBubbleId,
+                            ERROR_PREFIX + "Document not found."
+                    )
+            );
+            sendJsonToUser(
+                    userName,
+                    StreamDownstreamEvent.done(
+                            outboundClientStreamId,
+                            assistantBubbleId
+                    )
+            );
+            return;
+        }
         // EDIT FEATURE — validate edit targets when regenerating a mid-thread answer
         if (payload.getType() == ChatStompPayload.Type.EDIT) {
             if (payload.getEditTargetMessageId() == null || payload.getEditTargetMessageId().isBlank()) {
@@ -114,8 +173,6 @@ public class ChatWebSocketController {
             }
         }
 
-        final String assistantBubbleId = payload.getMessageId();
-
         final long persistedSessionId;
         try {
             ChatSession session = chatService.resolveStreamingSessionForUser(userName, payload.getSessionId(), latestUser);
@@ -127,7 +184,27 @@ public class ChatWebSocketController {
             return;
         }
 
-        String composedPrompt = ChatPromptComposer.compose(payload.getPriorMessages(), latestUser);
+//        String composedPrompt = ChatPromptComposer.compose(payload.getPriorMessages(), latestUser);
+        List<DocumentChunk> relevantChunks =
+                similarityService.findRelevantChunks(
+                        latestUser,
+                        payload.getDocumentId(),
+                        3
+                );
+        String context =
+                contextBuilderService.buildContext(
+                        relevantChunks
+                );
+        String ragPrompt =
+                promptBuilderService.buildPrompt(
+                        context,
+                        latestUser
+                );
+        String composedPrompt =
+                ChatPromptComposer.compose(
+                        payload.getPriorMessages(),
+                        ragPrompt
+                );
         log.info("WebSocket /app/chat — principal={}, type={}, assistantBubbleId={}, editTarget={}, clientStreamId={}, sessionId={}, promptChars={}",
                 userName,
                 payload.getType(),
@@ -190,6 +267,11 @@ public class ChatWebSocketController {
                 () ->
                 streamingService.streamChat(composedPrompt)
                         .doOnNext(chunk -> {
+                            System.out.println();
+                            System.out.println("========== STREAM CHUNK ==========");
+                            System.out.println(chunk);
+                            System.out.println("==================================");
+
                             if (!activeStreamRegistry.isCurrentStream(userName, streamId)) {
                                 throw new CancellationException("Stream ownership moved");
                             }

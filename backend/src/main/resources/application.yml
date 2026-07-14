@@ -60,6 +60,7 @@ app:
     ollama:
       base-url: http://localhost:11434
       model: ${OLLAMA_MODEL:qwen2.5:7b}
+      embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
 
   redis:
