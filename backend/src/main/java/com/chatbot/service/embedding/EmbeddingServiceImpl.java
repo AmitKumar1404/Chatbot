@@ -9,12 +9,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import com.chatbot.service.embedding.EmbeddingService;
 
 import java.util.List;
 
 @Service
 public class EmbeddingServiceImpl implements EmbeddingService {
+
+    private static final String DOCUMENT_PREFIX = "search_document: ";
+    private static final String QUERY_PREFIX = "search_query: ";
 
     @Value("${app.ai.ollama.base-url}")
     private String baseUrl;
@@ -30,11 +32,30 @@ public class EmbeddingServiceImpl implements EmbeddingService {
 
     @Override
     public List<Float> generateEmbedding(String text) {
+        return requestEmbedding(text);
+    }
+
+    @Override
+    public List<Float> generateDocumentEmbedding(String text) {
+        return requestEmbedding(DOCUMENT_PREFIX + text);
+    }
+
+    @Override
+    public List<Float> generateQueryEmbedding(String text) {
+        return requestEmbedding(QUERY_PREFIX + text);
+    }
+
+    private List<Float> requestEmbedding(String prompt) {
+
+        System.out.println();
+        System.out.println("========== EMBEDDING INPUT ==========");
+        System.out.println(prompt);
+        System.out.println("=====================================");
 
         EmbeddingRequest request =
                 EmbeddingRequest.builder()
                         .model(embeddingModel)
-                        .prompt(text)
+                        .prompt(prompt)
                         .build();
 
         HttpHeaders headers = new HttpHeaders();
@@ -60,3 +81,4 @@ public class EmbeddingServiceImpl implements EmbeddingService {
         return response.getEmbedding();
     }
 }
+

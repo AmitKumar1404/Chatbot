@@ -63,6 +63,11 @@ app:
       embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
 
+  rag:
+    hybrid:
+      enabled: true
+      dense-weight: 0.7
+
   redis:
     stream:
       active-ttl-seconds: ${REDIS_STREAM_ACTIVE_TTL_SECONDS:1800}
