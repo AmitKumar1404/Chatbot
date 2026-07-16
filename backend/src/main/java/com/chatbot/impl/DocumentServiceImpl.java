@@ -193,7 +193,7 @@ public class DocumentServiceImpl implements DocumentService {
 
                 // Generate embedding
                 List<Float> embedding =
-                        embeddingService.generateEmbedding(chunkText);
+                        embeddingService.generateDocumentEmbedding(chunkText);
 
                 System.out.println();
                 System.out.println("Embedding generated for Chunk " + (i + 1));

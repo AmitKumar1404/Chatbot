@@ -6,4 +6,8 @@ public interface EmbeddingService {
 
     List<Float> generateEmbedding(String text);
 
+    List<Float> generateDocumentEmbedding(String text);
+
+    List<Float> generateQueryEmbedding(String text);
+
 }

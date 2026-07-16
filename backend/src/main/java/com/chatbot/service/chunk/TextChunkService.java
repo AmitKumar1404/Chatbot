@@ -8,7 +8,8 @@ import java.util.List;
 @Service
 public class TextChunkService {
 
-    private static final int CHUNK_SIZE = 1000;
+    private static final int CHUNK_SIZE = 450;
+    private static final int CHUNK_OVERLAP = 100;
 
     public List<String> chunkText(String text) {
 
@@ -20,11 +21,17 @@ public class TextChunkService {
 
         text = text.trim();
 
-        for (int start = 0; start < text.length(); start += CHUNK_SIZE) {
+        int step = CHUNK_SIZE - CHUNK_OVERLAP;
+
+        for (int start = 0; start < text.length(); start += step) {
 
             int end = Math.min(start + CHUNK_SIZE, text.length());
 
             chunks.add(text.substring(start, end));
+
+            if (end == text.length()) {
+                break;
+            }
         }
 
         return chunks;
