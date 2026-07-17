@@ -73,6 +73,11 @@ app:
       chunk-size: 800
       overlap: 100
 
+    embedding:
+      include-heading: true
+      include-page-number: false
+      include-metadata: false
+
   redis:
     stream:
       active-ttl-seconds: ${REDIS_STREAM_ACTIVE_TTL_SECONDS:1800}
