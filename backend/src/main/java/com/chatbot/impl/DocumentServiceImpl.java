@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
+import com.chatbot.service.chunk.EmbeddingTextBuilder;
 import com.chatbot.service.chunk.TextChunk;
 import com.chatbot.service.chunk.TextChunkService;
 import java.util.List;
@@ -53,6 +54,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentChunkRepository documentChunkRepository;
     private final EmbeddingService embeddingService;
     private final DocumentChunkEmbeddingRepository documentChunkEmbeddingRepository;
+    private final EmbeddingTextBuilder embeddingTextBuilder;
 
     public DocumentServiceImpl(
             DocumentRepository documentRepository,
@@ -61,7 +63,8 @@ public class DocumentServiceImpl implements DocumentService {
             TextChunkService textChunkService,
             DocumentChunkRepository documentChunkRepository,
             EmbeddingService embeddingService,
-            DocumentChunkEmbeddingRepository documentChunkEmbeddingRepository) {
+            DocumentChunkEmbeddingRepository documentChunkEmbeddingRepository,
+            EmbeddingTextBuilder embeddingTextBuilder) {
 
         this.documentRepository = documentRepository;
         this.userRepository = userRepository;
@@ -70,6 +73,7 @@ public class DocumentServiceImpl implements DocumentService {
         this.documentChunkRepository = documentChunkRepository;
         this.embeddingService = embeddingService;
         this.documentChunkEmbeddingRepository = documentChunkEmbeddingRepository;
+        this.embeddingTextBuilder = embeddingTextBuilder;
     }
 
     @Override
@@ -164,26 +168,6 @@ public class DocumentServiceImpl implements DocumentService {
             System.out.println("TOTAL CHUNKS : " + chunks.size());
             System.out.println("==================================");
 
-            for (TextChunk chunk : chunks) {
-
-                String preview = chunk.getContent();
-                if (preview.length() > 160) {
-                    preview = preview.substring(0, 160) + "...";
-                }
-
-                System.out.println();
-                System.out.println("------------");
-                System.out.println("Chunk Index : " + chunk.getChunkIndex());
-                System.out.println("Characters  : " + chunk.getContent().length());
-                System.out.println("Words       : " + chunk.getWordCount());
-                System.out.println("Heading     : " + chunk.getSectionHeading());
-                System.out.println("Char Range  : " + chunk.getCharacterStart()
-                        + " - " + chunk.getCharacterEnd());
-                System.out.println("Page        : " + chunk.getEstimatedPageNumber());
-                System.out.println("Preview     : " + preview.replace('\n', ' '));
-                System.out.println("------------");
-            }
-
             // 12. Save metadata in database
             Document document = Document.builder()
                     .fileName(originalFileName)
@@ -201,10 +185,25 @@ public class DocumentServiceImpl implements DocumentService {
             for (TextChunk chunk : chunks) {
 
                 String chunkText = chunk.getContent();
+                String embeddingInput = embeddingTextBuilder.build(chunk);
 
-                // Generate embedding from original chunk content only
+                System.out.println();
+                System.out.println("------------");
+                System.out.println("Chunk Index : " + chunk.getChunkIndex());
+                System.out.println("Chunk Heading : " + chunk.getSectionHeading());
+                System.out.println("Stored Length : " + chunkText.length());
+                System.out.println("Embedding Input Length : " + embeddingInput.length());
+                System.out.println("Stored Content Preview : " + preview(chunkText, 160));
+                System.out.println("Embedding Input Preview : " + preview(embeddingInput, 160));
+                System.out.println("Words : " + chunk.getWordCount());
+                System.out.println("Char Range : " + chunk.getCharacterStart()
+                        + " - " + chunk.getCharacterEnd());
+                System.out.println("Page : " + chunk.getEstimatedPageNumber());
+                System.out.println("------------");
+
+                // Generate embedding from heading-aware input (stored content stays unchanged)
                 List<Float> embedding =
-                        embeddingService.generateDocumentEmbedding(chunkText);
+                        embeddingService.generateDocumentEmbedding(embeddingInput);
 
                 System.out.println();
                 System.out.println("Embedding generated for Chunk " + chunk.getChunkIndex());
@@ -244,6 +243,20 @@ public class DocumentServiceImpl implements DocumentService {
             );
         }
     }
+    private String preview(String text, int maxLength) {
+
+        if (text == null) {
+            return "";
+        }
+
+        String flattened = text.replace('\n', ' ').trim();
+        if (flattened.length() <= maxLength) {
+            return flattened;
+        }
+
+        return flattened.substring(0, maxLength) + "...";
+    }
+
     private String calculateSha256(MultipartFile file) {
 
         try {
