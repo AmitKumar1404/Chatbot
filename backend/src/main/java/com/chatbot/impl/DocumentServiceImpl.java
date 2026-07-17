@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
+import com.chatbot.service.chunk.TextChunk;
 import com.chatbot.service.chunk.TextChunkService;
 import java.util.List;
 import com.chatbot.model.DocumentChunk;
@@ -156,21 +157,31 @@ public class DocumentServiceImpl implements DocumentService {
             System.out.println("======== END OF PDF ==========");
             System.out.println();
 
-            // 11. Split extracted text into chunks
-            List<String> chunks = textChunkService.chunkText(extractedText);
+            // 11. Split extracted text into chunks (metadata kept in memory)
+            List<TextChunk> chunks = textChunkService.chunk(extractedText);
 
             System.out.println("==================================");
             System.out.println("TOTAL CHUNKS : " + chunks.size());
             System.out.println("==================================");
 
-            for (int i = 0; i < chunks.size(); i++) {
+            for (TextChunk chunk : chunks) {
+
+                String preview = chunk.getContent();
+                if (preview.length() > 160) {
+                    preview = preview.substring(0, 160) + "...";
+                }
 
                 System.out.println();
                 System.out.println("------------");
-                System.out.println("Chunk " + (i + 1));
+                System.out.println("Chunk Index : " + chunk.getChunkIndex());
+                System.out.println("Characters  : " + chunk.getContent().length());
+                System.out.println("Words       : " + chunk.getWordCount());
+                System.out.println("Heading     : " + chunk.getSectionHeading());
+                System.out.println("Char Range  : " + chunk.getCharacterStart()
+                        + " - " + chunk.getCharacterEnd());
+                System.out.println("Page        : " + chunk.getEstimatedPageNumber());
+                System.out.println("Preview     : " + preview.replace('\n', ' '));
                 System.out.println("------------");
-
-                System.out.println(chunks.get(i));
             }
 
             // 12. Save metadata in database
@@ -187,23 +198,23 @@ public class DocumentServiceImpl implements DocumentService {
 
             Document savedDocument = documentRepository.save(document);
 
-            for (int i = 0; i < chunks.size(); i++) {
+            for (TextChunk chunk : chunks) {
 
-                String chunkText = chunks.get(i);
+                String chunkText = chunk.getContent();
 
-                // Generate embedding
+                // Generate embedding from original chunk content only
                 List<Float> embedding =
                         embeddingService.generateDocumentEmbedding(chunkText);
 
                 System.out.println();
-                System.out.println("Embedding generated for Chunk " + (i + 1));
+                System.out.println("Embedding generated for Chunk " + chunk.getChunkIndex());
                 System.out.println("Vector Size : " + embedding.size());
 
-                // Save chunk
+                // Persist content + chunkIndex only (other TextChunk fields are future-ready)
                 DocumentChunk savedChunk = documentChunkRepository.save(
                         DocumentChunk.builder()
                                 .document(savedDocument)
-                                .chunkIndex(i)
+                                .chunkIndex(chunk.getChunkIndex())
                                 .content(chunkText)
                                 .createdAt(LocalDateTime.now())
                                 .build()
