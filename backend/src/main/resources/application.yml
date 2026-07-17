@@ -68,6 +68,11 @@ app:
       enabled: true
       dense-weight: 0.7
 
+    chunking:
+      enabled: true
+      chunk-size: 800
+      overlap: 100
+
   redis:
     stream:
       active-ttl-seconds: ${REDIS_STREAM_ACTIVE_TTL_SECONDS:1800}
