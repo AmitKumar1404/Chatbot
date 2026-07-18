@@ -50,7 +50,7 @@ public class Bm25Scorer {
         }
 
         String expandedQuery = expandQuery(query);
-        List<String> queryTokens = tokenize(expandedQuery);
+        List<String> queryTokens = dedupeTokens(tokenize(expandedQuery));
 
         log.debug(
                 "BM25 query expansion: originalPreview={}, expandedPreview={}, tokenCount={}, tokens={}",
@@ -184,6 +184,15 @@ public class Bm25Scorer {
         }
 
         return tokens;
+    }
+
+    private List<String> dedupeTokens(List<String> tokens) {
+
+        if (tokens == null || tokens.isEmpty()) {
+            return List.of();
+        }
+
+        return new ArrayList<>(new LinkedHashSet<>(tokens));
     }
 
     private String preview(String text, int maxLength) {

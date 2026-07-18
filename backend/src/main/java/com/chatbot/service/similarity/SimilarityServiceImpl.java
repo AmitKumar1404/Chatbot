@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,12 +61,18 @@ public class SimilarityServiceImpl implements SimilarityService {
         boolean useKeyword = resolvedKeywordWeight > 0.0;
 
         log.info(
-                "Retrieval started: documentId={}, queryPreview={}, vectorWeight={}, keywordWeight={}",
+                "Retrieval started: documentId={}, queryPreview={}",
                 documentId,
-                preview(question, 120),
-                vectorWeight,
-                resolvedKeywordWeight
+                preview(question, 120)
         );
+
+        if (log.isDebugEnabled()) {
+            log.debug(
+                    "Retrieval weights: vectorWeight={}, keywordWeight={}",
+                    vectorWeight,
+                    resolvedKeywordWeight
+            );
+        }
 
         List<Float> queryEmbedding =
                 embeddingService.generateQueryEmbedding(question);
@@ -113,6 +118,9 @@ public class SimilarityServiceImpl implements SimilarityService {
             }
         }
 
+        // All-zero BM25 contributes nothing; skip keyword fusion/normalization.
+        boolean applyKeyword = useKeyword && maxBm25Score > 0.0;
+
         Map<Long, double[]> scoresByChunkId = new HashMap<>();
 
         for (int i = 0; i < similarityResults.size(); i++) {
@@ -124,25 +132,53 @@ public class SimilarityServiceImpl implements SimilarityService {
             double normalizedVectorScore = maxCosineScore > 0.0
                     ? cosineScore / maxCosineScore
                     : 0.0;
-            double normalizedKeywordScore = useKeyword && maxBm25Score > 0.0
+            double normalizedKeywordScore = applyKeyword
                     ? bm25Score / maxBm25Score
                     : 0.0;
 
-            double hybridScore = useKeyword
-                    ? (vectorWeight * normalizedVectorScore)
-                    + (resolvedKeywordWeight * normalizedKeywordScore)
-                    : cosineScore;
+            double hybridScore;
+            if (!useKeyword) {
+                // Preserve pure-vector path when keyword weight is disabled.
+                hybridScore = cosineScore;
+            } else if (applyKeyword) {
+                hybridScore = (vectorWeight * normalizedVectorScore)
+                        + (resolvedKeywordWeight * normalizedKeywordScore);
+            } else {
+                // Keyword enabled but all BM25 scores are zero.
+                hybridScore = vectorWeight * normalizedVectorScore;
+            }
 
             similarityResults.get(i).setScore(hybridScore);
             scoresByChunkId.put(
                     chunk.getId(),
-                    new double[]{normalizedVectorScore, normalizedKeywordScore, hybridScore}
+                    new double[]{
+                            cosineScore,
+                            normalizedVectorScore,
+                            normalizedKeywordScore,
+                            hybridScore
+                    }
             );
         }
 
-        similarityResults.sort(
-                Comparator.comparingDouble(SimilarityResult::getScore).reversed()
-        );
+        similarityResults.sort((left, right) -> {
+            double[] leftScores = scoresByChunkId.get(left.getChunk().getId());
+            double[] rightScores = scoresByChunkId.get(right.getChunk().getId());
+
+            int byHybrid = Double.compare(rightScores[3], leftScores[3]);
+            if (byHybrid != 0) {
+                return byHybrid;
+            }
+
+            int byCosine = Double.compare(rightScores[0], leftScores[0]);
+            if (byCosine != 0) {
+                return byCosine;
+            }
+
+            return Integer.compare(
+                    left.getChunk().getChunkIndex(),
+                    right.getChunk().getChunkIndex()
+            );
+        });
 
         List<DocumentChunk> relevantChunks = new ArrayList<>();
 
@@ -155,21 +191,27 @@ public class SimilarityServiceImpl implements SimilarityService {
 
         long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNano);
 
-        StringBuilder topSummary = new StringBuilder();
+        StringBuilder topIds = new StringBuilder();
+        StringBuilder topScoreSummary = new StringBuilder();
+
         for (int i = 0; i < relevantChunks.size(); i++) {
             DocumentChunk chunk = relevantChunks.get(i);
             double[] scores = scoresByChunkId.get(chunk.getId());
+
             if (i > 0) {
-                topSummary.append("; ");
+                topIds.append(',');
+                topScoreSummary.append("; ");
             }
-            topSummary.append("id=")
+
+            topIds.append(chunk.getId());
+            topScoreSummary.append("id=")
                     .append(chunk.getId())
                     .append(" vector=")
-                    .append(scores != null ? scores[0] : 0.0)
-                    .append(" keyword=")
                     .append(scores != null ? scores[1] : 0.0)
+                    .append(" keyword=")
+                    .append(scores != null ? scores[2] : 0.0)
                     .append(" hybrid=")
-                    .append(scores != null ? scores[2] : 0.0);
+                    .append(scores != null ? scores[3] : 0.0);
         }
 
         log.info(
@@ -178,8 +220,16 @@ public class SimilarityServiceImpl implements SimilarityService {
                 durationMs,
                 similarityResults.size(),
                 relevantChunks.size(),
-                topSummary
+                topIds
         );
+
+        if (log.isDebugEnabled()) {
+            log.debug(
+                    "Retrieval top chunk scores: documentId={}, topChunks=[{}]",
+                    documentId,
+                    topScoreSummary
+            );
+        }
 
         return relevantChunks;
     }
