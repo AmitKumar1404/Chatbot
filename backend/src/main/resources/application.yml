@@ -73,6 +73,10 @@ app:
       keyword-weight: 0.2
       top-k: 5
 
+    context:
+      max-chunks: 5
+      max-characters: 6000
+
     chunking:
       enabled: true
       chunk-size: 800
