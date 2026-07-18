@@ -77,6 +77,8 @@ app:
       include-heading: true
       include-page-number: false
       include-metadata: false
+      batch-size: 32
+      log-previews: true
 
   redis:
     stream:
