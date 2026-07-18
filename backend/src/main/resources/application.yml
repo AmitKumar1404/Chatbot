@@ -68,6 +68,11 @@ app:
       enabled: true
       dense-weight: 0.7
 
+    retrieval:
+      vector-weight: 0.8
+      keyword-weight: 0.2
+      top-k: 5
+
     chunking:
       enabled: true
       chunk-size: 800
