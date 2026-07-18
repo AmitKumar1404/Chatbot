@@ -8,6 +8,8 @@ import com.chatbot.repository.UserRepository;
 import com.chatbot.service.DocumentService;
 import com.chatbot.service.pdf.PdfTextExtractor;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -37,15 +39,21 @@ import com.chatbot.model.DocumentChunkEmbedding;
 import com.chatbot.repository.DocumentChunkEmbeddingRepository;
 
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class DocumentServiceImpl implements DocumentService {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentServiceImpl.class);
 
     // 25 MB
     private static final long MAX_FILE_SIZE = 25 * 1024 * 1024;
 
     @Value("${file.upload-dir}")
     private String uploadDir;
+
+    @Value("${app.rag.embedding.log-previews:true}")
+    private boolean logPreviews;
 
     private final DocumentRepository documentRepository;
     private final UserRepository userRepository;
@@ -132,6 +140,10 @@ public class DocumentServiceImpl implements DocumentService {
         // 6. Create upload directory
         Path uploadPath = Paths.get(uploadDir);
 
+        long totalStart = System.nanoTime();
+        log.info("Upload started: file={}, sizeBytes={}, user={}",
+                originalFileName, file.getSize(), username);
+
         try {
 
             if (!Files.exists(uploadPath)) {
@@ -152,23 +164,82 @@ public class DocumentServiceImpl implements DocumentService {
             );
 
             // 10. Extract PDF text
+            long extractionStart = System.nanoTime();
             String extractedText =
                     pdfTextExtractor.extractText(destination.toFile());
+            long extractionMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - extractionStart);
 
-            System.out.println();
-            System.out.println("========== PDF TEXT ==========");
-            System.out.println(extractedText);
-            System.out.println("======== END OF PDF ==========");
-            System.out.println();
+            log.info("PDF extraction completed: file={}, textLength={}, durationMs={}",
+                    originalFileName,
+                    extractedText == null ? 0 : extractedText.length(),
+                    extractionMs);
 
             // 11. Split extracted text into chunks (metadata kept in memory)
+            long chunkingStart = System.nanoTime();
             List<TextChunk> chunks = textChunkService.chunk(extractedText);
+            long chunkingMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - chunkingStart);
 
-            System.out.println("==================================");
-            System.out.println("TOTAL CHUNKS : " + chunks.size());
-            System.out.println("==================================");
+            log.info("Chunking completed: file={}, chunkCount={}, durationMs={}",
+                    originalFileName, chunks.size(), chunkingMs);
+
+            List<TextChunk> validChunks = new ArrayList<>();
+            List<String> embeddingInputs = new ArrayList<>();
+
+            for (TextChunk chunk : chunks) {
+
+                String chunkText = chunk.getContent();
+
+                if (chunkText == null
+                        || chunkText.isBlank()
+                        || chunkText.trim().length() < 10) {
+                    log.warn("Skipping invalid chunk: index={}, length={}",
+                            chunk.getChunkIndex(),
+                            chunkText == null ? 0 : chunkText.length());
+                    continue;
+                }
+
+                String embeddingInput = embeddingTextBuilder.build(chunk);
+
+                if (embeddingInput == null || embeddingInput.isBlank()) {
+                    log.warn("Skipping chunk with blank embedding input: index={}",
+                            chunk.getChunkIndex());
+                    continue;
+                }
+
+                if (logPreviews) {
+                    log.info(
+                            "Chunk preview: index={}, heading={}, storedLength={}, embeddingInputLength={}, storedPreview={}, embeddingPreview={}",
+                            chunk.getChunkIndex(),
+                            chunk.getSectionHeading(),
+                            chunkText.length(),
+                            embeddingInput.length(),
+                            preview(chunkText, 140),
+                            preview(embeddingInput, 140)
+                    );
+                }
+
+                validChunks.add(chunk);
+                embeddingInputs.add(embeddingInput);
+            }
+
+            if (validChunks.isEmpty()) {
+                throw new RuntimeException(
+                        "No valid text chunks could be indexed from the uploaded PDF."
+                );
+            }
+
+            // Generate embeddings in batch (heading-aware input; stored content stays unchanged)
+            long embeddingStart = System.nanoTime();
+            List<List<Float>> embeddings =
+                    embeddingService.generateDocumentEmbeddings(embeddingInputs);
+            long embeddingMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - embeddingStart);
+
+            log.info("Embedding generation completed: file={}, vectorCount={}, durationMs={}",
+                    originalFileName, embeddings.size(), embeddingMs);
 
             // 12. Save metadata in database
+            long persistenceStart = System.nanoTime();
+
             Document document = Document.builder()
                     .fileName(originalFileName)
                     .storedFileName(storedFileName)
@@ -182,39 +253,26 @@ public class DocumentServiceImpl implements DocumentService {
 
             Document savedDocument = documentRepository.save(document);
 
-            for (TextChunk chunk : chunks) {
+            int persistedCount = 0;
 
-                String chunkText = chunk.getContent();
-                String embeddingInput = embeddingTextBuilder.build(chunk);
+            for (int i = 0; i < validChunks.size(); i++) {
 
-                System.out.println();
-                System.out.println("------------");
-                System.out.println("Chunk Index : " + chunk.getChunkIndex());
-                System.out.println("Chunk Heading : " + chunk.getSectionHeading());
-                System.out.println("Stored Length : " + chunkText.length());
-                System.out.println("Embedding Input Length : " + embeddingInput.length());
-                System.out.println("Stored Content Preview : " + preview(chunkText, 160));
-                System.out.println("Embedding Input Preview : " + preview(embeddingInput, 160));
-                System.out.println("Words : " + chunk.getWordCount());
-                System.out.println("Char Range : " + chunk.getCharacterStart()
-                        + " - " + chunk.getCharacterEnd());
-                System.out.println("Page : " + chunk.getEstimatedPageNumber());
-                System.out.println("------------");
-
-                // Generate embedding from heading-aware input (stored content stays unchanged)
+                TextChunk chunk = validChunks.get(i);
                 List<Float> embedding =
-                        embeddingService.generateDocumentEmbedding(embeddingInput);
+                        i < embeddings.size() ? embeddings.get(i) : null;
 
-                System.out.println();
-                System.out.println("Embedding generated for Chunk " + chunk.getChunkIndex());
-                System.out.println("Vector Size : " + embedding.size());
+                if (embedding == null || embedding.isEmpty()) {
+                    log.warn("Skipping chunk persistence due to missing embedding: index={}",
+                            chunk.getChunkIndex());
+                    continue;
+                }
 
                 // Persist content + chunkIndex only (other TextChunk fields are future-ready)
                 DocumentChunk savedChunk = documentChunkRepository.save(
                         DocumentChunk.builder()
                                 .document(savedDocument)
                                 .chunkIndex(chunk.getChunkIndex())
-                                .content(chunkText)
+                                .content(chunk.getContent())
                                 .createdAt(LocalDateTime.now())
                                 .build()
                 );
@@ -225,7 +283,39 @@ public class DocumentServiceImpl implements DocumentService {
                                 .createdAt(LocalDateTime.now())
                                 .build()
                 );
+
+                persistedCount++;
             }
+
+            long persistenceMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - persistenceStart);
+
+            if (persistedCount == 0) {
+                throw new RuntimeException(
+                        "Failed to persist any chunk embeddings for the uploaded PDF."
+                );
+            }
+
+            if (persistedCount < validChunks.size()) {
+                log.warn("Persisted {} of {} chunks successfully.",
+                        persistedCount, validChunks.size());
+            }
+
+            long totalMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - totalStart);
+
+            log.info(
+                    "Upload Summary | file={} | documentId={} | Extraction={} ms | Chunking={} ms | Embedding={} ms | Database={} ms | Total={} ms | PersistedChunks={}",
+                    originalFileName,
+                    savedDocument.getId(),
+                    extractionMs,
+                    chunkingMs,
+                    embeddingMs,
+                    persistenceMs,
+                    totalMs,
+                    persistedCount
+            );
+
+            log.info("Upload completed: documentId={}, file={}",
+                    savedDocument.getId(), originalFileName);
 
             // 13. Return response
             return DocumentUploadResponse.builder()
@@ -243,6 +333,7 @@ public class DocumentServiceImpl implements DocumentService {
             );
         }
     }
+
     private String preview(String text, int maxLength) {
 
         if (text == null) {
