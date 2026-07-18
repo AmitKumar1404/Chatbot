@@ -1,5 +1,7 @@
 package com.chatbot.service.retrieval;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -12,6 +14,8 @@ import java.util.Set;
 
 @Component
 public class Bm25Scorer {
+
+    private static final Logger log = LoggerFactory.getLogger(Bm25Scorer.class);
 
     private static final double K1 = 1.2;
     private static final double B = 0.75;
@@ -48,10 +52,13 @@ public class Bm25Scorer {
         String expandedQuery = expandQuery(query);
         List<String> queryTokens = tokenize(expandedQuery);
 
-        System.out.println();
-        System.out.println("Original query: " + query);
-        System.out.println("Expanded BM25 query: " + expandedQuery);
-        System.out.println("BM25 tokens: " + queryTokens);
+        log.debug(
+                "BM25 query expansion: originalPreview={}, expandedPreview={}, tokenCount={}, tokens={}",
+                preview(query, 120),
+                preview(expandedQuery, 160),
+                queryTokens.size(),
+                queryTokens
+        );
 
         if (queryTokens.isEmpty()) {
             return new double[documents.size()];
@@ -177,5 +184,19 @@ public class Bm25Scorer {
         }
 
         return tokens;
+    }
+
+    private String preview(String text, int maxLength) {
+
+        if (text == null) {
+            return "";
+        }
+
+        String flattened = text.replace('\n', ' ').trim();
+        if (flattened.length() <= maxLength) {
+            return flattened;
+        }
+
+        return flattened.substring(0, maxLength) + "...";
     }
 }

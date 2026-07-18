@@ -13,6 +13,7 @@ import com.chatbot.service.similarity.SimilarityService;
 import com.chatbot.repository.DocumentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -36,6 +37,9 @@ public class ChatWebSocketController {
     private static final Logger log = LoggerFactory.getLogger(ChatWebSocketController.class);
     private static final String USER_QUEUE = "/queue/messages";
     private static final long PARTIAL_PERSIST_INTERVAL_MS = 400;
+
+    @Value("${app.rag.retrieval.top-k:5}")
+    private int retrievalTopK;
 
     private final OllamaStreamingService streamingService;
     private final SimpMessagingTemplate messagingTemplate;
@@ -189,7 +193,7 @@ public class ChatWebSocketController {
                 similarityService.findRelevantChunks(
                         latestUser,
                         payload.getDocumentId(),
-                        3
+                        retrievalTopK
                 );
         String context =
                 contextBuilderService.buildContext(

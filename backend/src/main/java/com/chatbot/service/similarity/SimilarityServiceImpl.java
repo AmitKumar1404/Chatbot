@@ -6,17 +6,24 @@ import com.chatbot.model.DocumentChunkEmbedding;
 import com.chatbot.repository.DocumentChunkEmbeddingRepository;
 import com.chatbot.service.embedding.EmbeddingService;
 import com.chatbot.service.retrieval.Bm25Scorer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @Transactional(readOnly = true)
 public class SimilarityServiceImpl implements SimilarityService {
+
+    private static final Logger log = LoggerFactory.getLogger(SimilarityServiceImpl.class);
 
     private final EmbeddingService embeddingService;
 
@@ -27,8 +34,11 @@ public class SimilarityServiceImpl implements SimilarityService {
     @Value("${app.rag.hybrid.enabled:true}")
     private boolean hybridEnabled;
 
-    @Value("${app.rag.hybrid.dense-weight:0.7}")
-    private double denseWeight;
+    @Value("${app.rag.retrieval.vector-weight:${app.rag.hybrid.dense-weight:0.8}}")
+    private double vectorWeight;
+
+    @Value("${app.rag.retrieval.keyword-weight:-1}")
+    private double keywordWeightProperty;
 
     public SimilarityServiceImpl(
             EmbeddingService embeddingService,
@@ -46,26 +56,24 @@ public class SimilarityServiceImpl implements SimilarityService {
             Long documentId,
             int topK) {
 
+        long startNano = System.nanoTime();
+
+        double resolvedKeywordWeight = resolveKeywordWeight();
+        boolean useKeyword = resolvedKeywordWeight > 0.0;
+
+        log.info(
+                "Retrieval started: documentId={}, queryPreview={}, vectorWeight={}, keywordWeight={}",
+                documentId,
+                preview(question, 120),
+                vectorWeight,
+                resolvedKeywordWeight
+        );
+
         List<Float> queryEmbedding =
                 embeddingService.generateQueryEmbedding(question);
 
-        System.out.println();
-        System.out.println("==================================");
-        System.out.println("QUESTION");
-        System.out.println(question);
-        System.out.println("Embedding Size : " + queryEmbedding.size());
-        System.out.println("Hybrid Enabled : " + hybridEnabled);
-        System.out.println("Dense Weight   : " + denseWeight);
-        System.out.println("==================================");
-
         List<DocumentChunkEmbedding> storedEmbeddings =
                 embeddingRepository.findByChunk_Document_Id(documentId);
-
-        System.out.println();
-        System.out.println("==============================");
-        System.out.println("Document Id : " + documentId);
-        System.out.println("Embeddings Loaded : " + storedEmbeddings.size());
-        System.out.println("==============================");
 
         List<SimilarityResult> similarityResults = new ArrayList<>();
         List<String> chunkContents = new ArrayList<>();
@@ -89,87 +97,52 @@ public class SimilarityServiceImpl implements SimilarityService {
             );
         }
 
-        double[] bm25Scores = hybridEnabled
+        double[] bm25Scores = useKeyword
                 ? bm25Scorer.score(question, chunkContents)
                 : new double[chunkContents.size()];
 
+        double maxCosineScore = 0.0;
+        for (double cosineScore : cosineScores) {
+            maxCosineScore = Math.max(maxCosineScore, cosineScore);
+        }
+
         double maxBm25Score = 0.0;
-        if (hybridEnabled) {
+        if (useKeyword) {
             for (double bm25Score : bm25Scores) {
                 maxBm25Score = Math.max(maxBm25Score, bm25Score);
             }
         }
+
+        Map<Long, double[]> scoresByChunkId = new HashMap<>();
 
         for (int i = 0; i < similarityResults.size(); i++) {
 
             DocumentChunk chunk = similarityResults.get(i).getChunk();
             double cosineScore = cosineScores.get(i);
             double bm25Score = bm25Scores[i];
-            double normalizedBm25Score = hybridEnabled && maxBm25Score > 0.0
+
+            double normalizedVectorScore = maxCosineScore > 0.0
+                    ? cosineScore / maxCosineScore
+                    : 0.0;
+            double normalizedKeywordScore = useKeyword && maxBm25Score > 0.0
                     ? bm25Score / maxBm25Score
                     : 0.0;
 
-            double finalScore = hybridEnabled
-                    ? (denseWeight * cosineScore) + ((1.0 - denseWeight) * normalizedBm25Score)
+            double hybridScore = useKeyword
+                    ? (vectorWeight * normalizedVectorScore)
+                    + (resolvedKeywordWeight * normalizedKeywordScore)
                     : cosineScore;
 
-            similarityResults.get(i).setScore(finalScore);
-
-            System.out.println();
-            System.out.println("----------------------------");
-            System.out.println("Chunk Id : " + chunk.getId());
-            System.out.println("Chunk Index : " + chunk.getChunkIndex());
-            System.out.println("Cosine Score : " + cosineScore);
-
-            if (hybridEnabled) {
-                System.out.println("BM25 Score : " + bm25Score);
-                System.out.println("Normalized BM25 Score : " + normalizedBm25Score);
-                System.out.println("Final Score : " + finalScore);
-            }
+            similarityResults.get(i).setScore(hybridScore);
+            scoresByChunkId.put(
+                    chunk.getId(),
+                    new double[]{normalizedVectorScore, normalizedKeywordScore, hybridScore}
+            );
         }
 
         similarityResults.sort(
                 Comparator.comparingDouble(SimilarityResult::getScore).reversed()
         );
-
-        System.out.println();
-        if (hybridEnabled) {
-            System.out.println("========== FINAL SORTED RESULTS ==========");
-        } else {
-            System.out.println("========== SORTED RESULTS ==========");
-        }
-
-        for (SimilarityResult result : similarityResults) {
-
-            if (hybridEnabled) {
-                int index = findResultIndex(storedEmbeddings, result.getChunk().getId());
-                double cosineScore = cosineScores.get(index);
-                double bm25Score = bm25Scores[index];
-                double normalizedBm25Score = maxBm25Score > 0.0
-                        ? bm25Score / maxBm25Score
-                        : 0.0;
-
-                System.out.println(
-                        "Chunk "
-                                + result.getChunk().getId()
-                                + " -> Final="
-                                + result.getScore()
-                                + " Cosine="
-                                + cosineScore
-                                + " BM25="
-                                + bm25Score
-                                + " NormalizedBM25="
-                                + normalizedBm25Score
-                );
-            } else {
-                System.out.println(
-                        "Chunk "
-                                + result.getChunk().getId()
-                                + " -> "
-                                + result.getScore()
-                );
-            }
-        }
 
         List<DocumentChunk> relevantChunks = new ArrayList<>();
 
@@ -180,31 +153,62 @@ public class SimilarityServiceImpl implements SimilarityService {
             relevantChunks.add(similarityResults.get(i).getChunk());
         }
 
-        System.out.println();
-        System.out.println("========== TOP " + topK + " CHUNKS ==========");
+        long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNano);
 
-        for (DocumentChunk chunk : relevantChunks) {
-
-            System.out.println("Chunk Id : " + chunk.getId());
-            System.out.println("Chunk Index : " + chunk.getChunkIndex());
-            System.out.println("Content : " + chunk.getContent());
-            System.out.println("------------------------------------");
+        StringBuilder topSummary = new StringBuilder();
+        for (int i = 0; i < relevantChunks.size(); i++) {
+            DocumentChunk chunk = relevantChunks.get(i);
+            double[] scores = scoresByChunkId.get(chunk.getId());
+            if (i > 0) {
+                topSummary.append("; ");
+            }
+            topSummary.append("id=")
+                    .append(chunk.getId())
+                    .append(" vector=")
+                    .append(scores != null ? scores[0] : 0.0)
+                    .append(" keyword=")
+                    .append(scores != null ? scores[1] : 0.0)
+                    .append(" hybrid=")
+                    .append(scores != null ? scores[2] : 0.0);
         }
+
+        log.info(
+                "Retrieval completed: documentId={}, durationMs={}, candidateCount={}, returnedCount={}, topChunks=[{}]",
+                documentId,
+                durationMs,
+                similarityResults.size(),
+                relevantChunks.size(),
+                topSummary
+        );
 
         return relevantChunks;
     }
 
-    private int findResultIndex(
-            List<DocumentChunkEmbedding> storedEmbeddings,
-            Long chunkId) {
+    private double resolveKeywordWeight() {
 
-        for (int i = 0; i < storedEmbeddings.size(); i++) {
-            if (storedEmbeddings.get(i).getChunk().getId().equals(chunkId)) {
-                return i;
-            }
+        if (keywordWeightProperty >= 0.0) {
+            return keywordWeightProperty;
         }
 
-        return 0;
+        if (!hybridEnabled) {
+            return 0.0;
+        }
+
+        return Math.max(0.0, 1.0 - vectorWeight);
+    }
+
+    private String preview(String text, int maxLength) {
+
+        if (text == null) {
+            return "";
+        }
+
+        String flattened = text.replace('\n', ' ').trim();
+        if (flattened.length() <= maxLength) {
+            return flattened;
+        }
+
+        return flattened.substring(0, maxLength) + "...";
     }
 
     private double cosineSimilarity(
