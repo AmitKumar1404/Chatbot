@@ -7,6 +7,12 @@ spring:
   config:
     import: optional:file:.env[.properties]
 
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 25MB
+      max-request-size: 25MB
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -54,7 +60,34 @@ app:
     ollama:
       base-url: http://localhost:11434
       model: ${OLLAMA_MODEL:qwen2.5:7b}
+      embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
       system-prompt: "You are a helpful AI assistant. Answer clearly and concisely."
+
+  rag:
+    hybrid:
+      enabled: true
+      dense-weight: 0.7
+
+    retrieval:
+      vector-weight: 0.8
+      keyword-weight: 0.2
+      top-k: 5
+
+    context:
+      max-chunks: 5
+      max-characters: 6000
+
+    chunking:
+      enabled: true
+      chunk-size: 800
+      overlap: 100
+
+    embedding:
+      include-heading: true
+      include-page-number: false
+      include-metadata: false
+      batch-size: 32
+      log-previews: true
 
   redis:
     stream:
@@ -97,3 +130,6 @@ info:
     name: Chatbot Backend
     version: 1.0.0
     description: ChatGPT-like AI chatbot backend
+
+file:
+  upload-dir: uploads

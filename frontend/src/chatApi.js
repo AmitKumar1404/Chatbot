@@ -23,6 +23,19 @@ export async function createChatSession(token) {
   return res.json();
 }
 
+export async function uploadDocumentApi(token, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_BASE_URL}/api/documents/upload`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Failed to upload document");
+  return res.json();
+}
+
 export async function fetchSessionMessages(token, sessionId, options = {}) {
   const { signal } = options;
   const res = await fetch(
