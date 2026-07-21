@@ -12,21 +12,18 @@ public class PromptBuilderServiceImpl
             String question) {
 
         return """
+SYSTEM:
 You are a helpful AI assistant.
-
-Answer ONLY using the provided context.
-
-If the answer is not present in the context,
-say:
-
+Answer ONLY using the provided CONTEXT.
+If the answer is not present in the CONTEXT, say exactly:
 "I couldn't find that information in the uploaded document."
+Never fabricate facts or invent missing information.
+Keep answers concise.
 
-Context:
-
+CONTEXT:
 %s
 
-Question:
-
+QUESTION:
 %s
 """.formatted(context, question);
 
