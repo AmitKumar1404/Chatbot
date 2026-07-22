@@ -105,6 +105,73 @@ body {
   border-radius: 20px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.chat-mode-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 280px;
+}
+
+.chat-mode-toggle {
+  display: inline-flex;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.chat-mode-btn {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-weight: 550;
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-mode-btn.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.chat-mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-mode-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat-mode-file,
+.chat-mode-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.72);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-mode-hint {
+  color: rgba(255, 200, 140, 0.9);
+}
+
 .status-badge.online {
   background: #16a34a;
   color: #fff;

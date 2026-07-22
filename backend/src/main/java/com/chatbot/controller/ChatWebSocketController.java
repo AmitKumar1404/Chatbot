@@ -11,6 +11,7 @@ import com.chatbot.service.rag.ContextBuilderService;
 import com.chatbot.service.rag.PromptBuilderService;
 import com.chatbot.service.similarity.SimilarityService;
 import com.chatbot.repository.DocumentRepository;
+import com.chatbot.model.DocumentChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Controller;
 import reactor.core.publisher.SignalType;
 
 import java.security.Principal;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -28,8 +30,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.chatbot.constant.StreamConstants.ERROR_PREFIX;
 import static com.chatbot.constant.StreamConstants.isTransientStreamingFailure;
-import com.chatbot.model.DocumentChunk;
-import java.util.List;
 
 @Controller
 public class ChatWebSocketController {
@@ -113,44 +113,48 @@ public class ChatWebSocketController {
 
         final String assistantBubbleId = payload.getMessageId();
 
-        if (payload.getDocumentId() == null) {
+        // Explicit client mode only. Missing/null chatMode => NORMAL (even if documentId is set).
+        final boolean useDocumentMode =
+                payload.getChatMode() == ChatStompPayload.ChatMode.DOCUMENT;
+        final Long documentId = useDocumentMode ? payload.getDocumentId() : null;
 
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.error(
-                            outboundClientStreamId,
-                            assistantBubbleId,
-                            ERROR_PREFIX + "Please upload a document first."
-                    )
-            );
-
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.done(
-                            outboundClientStreamId,
-                            assistantBubbleId
-                    )
-            );
-
-            return;
-        }
-        if (!documentRepository.existsByIdAndUploadedBy_Username(payload.getDocumentId(), userName)) {
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.error(
-                            outboundClientStreamId,
-                            assistantBubbleId,
-                            ERROR_PREFIX + "Document not found."
-                    )
-            );
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.done(
-                            outboundClientStreamId,
-                            assistantBubbleId
-                    )
-            );
-            return;
+        if (useDocumentMode) {
+            if (documentId == null) {
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.error(
+                                outboundClientStreamId,
+                                assistantBubbleId,
+                                ERROR_PREFIX + "DOCUMENT mode requires documentId."
+                        )
+                );
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.done(
+                                outboundClientStreamId,
+                                assistantBubbleId
+                        )
+                );
+                return;
+            }
+            if (!documentRepository.existsByIdAndUploadedBy_Username(documentId, userName)) {
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.error(
+                                outboundClientStreamId,
+                                assistantBubbleId,
+                                ERROR_PREFIX + "Document not found."
+                        )
+                );
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.done(
+                                outboundClientStreamId,
+                                assistantBubbleId
+                        )
+                );
+                return;
+            }
         }
         // EDIT FEATURE — validate edit targets when regenerating a mid-thread answer
         if (payload.getType() == ChatStompPayload.Type.EDIT) {
@@ -188,27 +192,44 @@ public class ChatWebSocketController {
             return;
         }
 
-//        String composedPrompt = ChatPromptComposer.compose(payload.getPriorMessages(), latestUser);
-        List<DocumentChunk> relevantChunks =
-                similarityService.findRelevantChunks(
-                        latestUser,
-                        payload.getDocumentId(),
-                        retrievalTopK
-                );
-        String context =
-                contextBuilderService.buildContext(
-                        relevantChunks
-                );
-        String ragPrompt =
-                promptBuilderService.buildPrompt(
-                        context,
-                        latestUser
-                );
-        String composedPrompt =
-                ChatPromptComposer.compose(
-                        payload.getPriorMessages(),
-                        ragPrompt
-                );
+        final String composedPrompt;
+        if (useDocumentMode) {
+            log.info(
+                    "Chat mode: DOCUMENT documentId={}, queryPreview={}",
+                    documentId,
+                    previewQuery(latestUser, 120)
+            );
+            List<DocumentChunk> relevantChunks =
+                    similarityService.findRelevantChunks(
+                            latestUser,
+                            documentId,
+                            retrievalTopK
+                    );
+            String context =
+                    contextBuilderService.buildContext(
+                            relevantChunks
+                    );
+            String ragPrompt =
+                    promptBuilderService.buildPrompt(
+                            context,
+                            latestUser
+                    );
+            composedPrompt =
+                    ChatPromptComposer.compose(
+                            payload.getPriorMessages(),
+                            ragPrompt
+                    );
+        } else {
+            log.info(
+                    "Chat mode: NORMAL queryPreview={}",
+                    previewQuery(latestUser, 120)
+            );
+            composedPrompt =
+                    ChatPromptComposer.compose(
+                            payload.getPriorMessages(),
+                            latestUser
+                    );
+        }
         log.info("WebSocket /app/chat — principal={}, type={}, assistantBubbleId={}, editTarget={}, clientStreamId={}, sessionId={}, promptChars={}",
                 userName,
                 payload.getType(),
@@ -441,5 +462,16 @@ public class ChatWebSocketController {
                 USER_QUEUE,
                 event
         );
+    }
+
+    private String previewQuery(String text, int maxLength) {
+        if (text == null) {
+            return "";
+        }
+        String flattened = text.replace('\n', ' ').trim();
+        if (flattened.length() <= maxLength) {
+            return flattened;
+        }
+        return flattened.substring(0, maxLength) + "...";
     }
 }
