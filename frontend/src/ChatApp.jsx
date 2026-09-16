@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ChatWindow from "./components/ChatWindow";
 import InputBox from "./components/InputBox";
+import ChatModeToggle from "./components/ChatModeToggle";
 import SearchBar from "./components/SearchBar";
 import {
   connectWebSocket,
@@ -255,6 +256,8 @@ export default function ChatApp() {
   const [isSearching, setIsSearching] = useState(false);
   const [openedSearchMatch, setOpenedSearchMatch] = useState(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
+  const [selectedDocumentName, setSelectedDocumentName] = useState(null);
+  const [chatMode, setChatMode] = useState("NORMAL");
 
   const [isDesktopViewport, setIsDesktopViewport] = useState(
     getInitialIsDesktopViewport
@@ -282,6 +285,7 @@ export default function ChatApp() {
   const streamUserMessageIdRef = useRef(null);
   const streamEditTargetRef = useRef(null);
   const selectedDocumentIdRef = useRef(null);
+  const chatModeRef = useRef("NORMAL");
   const resumeAttemptedForStreamIdRef = useRef(null);
   const streamReplayPrefixRef = useRef(null);
   const streamReplayCursorRef = useRef(0);
@@ -300,8 +304,14 @@ export default function ChatApp() {
   }, [selectedDocumentId]);
 
   useEffect(() => {
+    chatModeRef.current = chatMode;
+  }, [chatMode]);
+
+  useEffect(() => {
     if (token) return;
     setSelectedDocumentId(null);
+    setSelectedDocumentName(null);
+    setChatMode("NORMAL");
   }, [token]);
 
   useEffect(() => {
@@ -592,6 +602,7 @@ export default function ChatApp() {
         setOpenedSearchMatch(null);
       }
       setActiveChatId(chatId);
+      setChatMode("NORMAL");
       if (!isDesktopViewport) {
         setIsMobileSidebarOpen(false);
       }
@@ -840,8 +851,11 @@ export default function ChatApp() {
         content: user.content ?? "",
         priorMessages,
       };
-      if (selectedDocumentIdRef.current != null) {
+      if (selectedDocumentIdRef.current != null && chatModeRef.current === "DOCUMENT") {
+        payload.chatMode = "DOCUMENT";
         payload.documentId = selectedDocumentIdRef.current;
+      } else {
+        payload.chatMode = "NORMAL";
       }
 
       if (type === "EDIT") {
@@ -1261,9 +1275,31 @@ export default function ChatApp() {
     try {
       const response = await uploadDocumentApi(token, file);
       setSelectedDocumentId(response.id);
+      setSelectedDocumentName(file.name || response.fileName || "document.pdf");
+      // Uploading must not auto-activate DOCUMENT/RAG mode.
+      setChatMode("NORMAL");
     } catch (error) {
       console.error(error);
     }
+  }
+
+  function applyChatMode(nextMode) {
+    if (nextMode === "DOCUMENT" && selectedDocumentId == null) {
+      return;
+    }
+    setChatMode(nextMode);
+  }
+
+  function buildModePayloadFields() {
+    if (chatMode === "DOCUMENT" && selectedDocumentId != null) {
+      return {
+        chatMode: "DOCUMENT",
+        documentId: selectedDocumentId,
+      };
+    }
+    return {
+      chatMode: "NORMAL",
+    };
   }
 
   function handleSend(text) {
@@ -1343,7 +1379,7 @@ export default function ChatApp() {
       userMessageId,
       content: text,
       priorMessages,
-      documentId: selectedDocumentId,
+      ...buildModePayloadFields(),
     });
   }
 
@@ -1421,13 +1457,16 @@ export default function ChatApp() {
         content: trimmed,
         editTargetMessageId: userMessageId,
         priorMessages,
-        documentId: selectedDocumentId,
+        ...(chatMode === "DOCUMENT" && selectedDocumentId != null
+          ? { chatMode: "DOCUMENT", documentId: selectedDocumentId }
+          : { chatMode: "NORMAL" }),
       });
       return true;
     },
     [
       connected,
       isBrowserOffline,
+      chatMode,
       selectedDocumentId,
       setOwnedStream,
       setStreamingState,
@@ -1455,6 +1494,7 @@ export default function ChatApp() {
     if (existingBlankChat) {
       setActiveChatId(existingBlankChat.id);
       activeChatIdRef.current = existingBlankChat.id;
+      setChatMode("NORMAL");
       return;
     }
 
@@ -1474,6 +1514,7 @@ export default function ChatApp() {
     setActiveChatId(tempId);
 
     activeChatIdRef.current = tempId;
+    setChatMode("NORMAL");
   }
 
   // function handleSidebarToggle() {
@@ -1562,6 +1603,7 @@ export default function ChatApp() {
     setChats((prev) => {
       const next = prev.filter((c) => c.id !== chatId);
       if (activeChatIdRef.current === chatId) {
+        setChatMode("NORMAL");
         setActiveChatId(next.length ? next[0].id : null);
       }
       return next;
@@ -1964,6 +2006,13 @@ export default function ChatApp() {
               type="file"
               accept="application/pdf"
               onChange={handleDocumentUpload}
+            />
+            <ChatModeToggle
+              chatMode={chatMode}
+              onChange={applyChatMode}
+              hasDocument={selectedDocumentId != null}
+              selectedDocumentName={selectedDocumentName}
+              disabled={isStreaming || isBrowserOffline}
             />
             <span
               className={`status-badge ${
