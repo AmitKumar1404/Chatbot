@@ -113,44 +113,48 @@ public class ChatWebSocketController {
 
         final String assistantBubbleId = payload.getMessageId();
 
-        if (payload.getDocumentId() == null) {
+        // Explicit client mode only. Missing/null chatMode => NORMAL (even if documentId is set).
+        final boolean useDocumentMode =
+                payload.getChatMode() == ChatStompPayload.ChatMode.DOCUMENT;
+        final Long documentId = useDocumentMode ? payload.getDocumentId() : null;
 
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.error(
-                            outboundClientStreamId,
-                            assistantBubbleId,
-                            ERROR_PREFIX + "Please upload a document first."
-                    )
-            );
-
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.done(
-                            outboundClientStreamId,
-                            assistantBubbleId
-                    )
-            );
-
-            return;
-        }
-        if (!documentRepository.existsByIdAndUploadedBy_Username(payload.getDocumentId(), userName)) {
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.error(
-                            outboundClientStreamId,
-                            assistantBubbleId,
-                            ERROR_PREFIX + "Document not found."
-                    )
-            );
-            sendJsonToUser(
-                    userName,
-                    StreamDownstreamEvent.done(
-                            outboundClientStreamId,
-                            assistantBubbleId
-                    )
-            );
-            return;
+        if (useDocumentMode) {
+            if (documentId == null) {
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.error(
+                                outboundClientStreamId,
+                                assistantBubbleId,
+                                ERROR_PREFIX + "Please upload a document first."
+                        )
+                );
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.done(
+                                outboundClientStreamId,
+                                assistantBubbleId
+                        )
+                );
+                return;
+            }
+            if (!documentRepository.existsByIdAndUploadedBy_Username(documentId, userName)) {
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.error(
+                                outboundClientStreamId,
+                                assistantBubbleId,
+                                ERROR_PREFIX + "Document not found."
+                        )
+                );
+                sendJsonToUser(
+                        userName,
+                        StreamDownstreamEvent.done(
+                                outboundClientStreamId,
+                                assistantBubbleId
+                        )
+                );
+                return;
+            }
         }
         // EDIT FEATURE — validate edit targets when regenerating a mid-thread answer
         if (payload.getType() == ChatStompPayload.Type.EDIT) {
@@ -188,27 +192,44 @@ public class ChatWebSocketController {
             return;
         }
 
-//        String composedPrompt = ChatPromptComposer.compose(payload.getPriorMessages(), latestUser);
-        List<DocumentChunk> relevantChunks =
-                similarityService.findRelevantChunks(
-                        latestUser,
-                        payload.getDocumentId(),
-                        retrievalTopK
-                );
-        String context =
-                contextBuilderService.buildContext(
-                        relevantChunks
-                );
-        String ragPrompt =
-                promptBuilderService.buildPrompt(
-                        context,
-                        latestUser
-                );
-        String composedPrompt =
-                ChatPromptComposer.compose(
-                        payload.getPriorMessages(),
-                        ragPrompt
-                );
+        final String composedPrompt;
+        if (useDocumentMode) {
+            log.info(
+                    "Chat mode: DOCUMENT documentId={}, queryPreview={}",
+                    documentId,
+                    previewQuery(latestUser, 120)
+            );
+            List<DocumentChunk> relevantChunks =
+                    similarityService.findRelevantChunks(
+                            latestUser,
+                            documentId,
+                            retrievalTopK
+                    );
+            String context =
+                    contextBuilderService.buildContext(
+                            relevantChunks
+                    );
+            String ragPrompt =
+                    promptBuilderService.buildPrompt(
+                            context,
+                            latestUser
+                    );
+            composedPrompt =
+                    ChatPromptComposer.compose(
+                            payload.getPriorMessages(),
+                            ragPrompt
+                    );
+        } else {
+            log.info(
+                    "Chat mode: NORMAL queryPreview={}",
+                    previewQuery(latestUser, 120)
+            );
+            composedPrompt =
+                    ChatPromptComposer.compose(
+                            payload.getPriorMessages(),
+                            latestUser
+                    );
+        }
         log.info("WebSocket /app/chat — principal={}, type={}, assistantBubbleId={}, editTarget={}, clientStreamId={}, sessionId={}, promptChars={}",
                 userName,
                 payload.getType(),
@@ -441,5 +462,16 @@ public class ChatWebSocketController {
                 USER_QUEUE,
                 event
         );
+    }
+
+    private String previewQuery(String text, int maxLength) {
+        if (text == null) {
+            return "";
+        }
+        String flattened = text.replace('\n', ' ').trim();
+        if (flattened.length() <= maxLength) {
+            return flattened;
+        }
+        return flattened.substring(0, maxLength) + "...";
     }
 }

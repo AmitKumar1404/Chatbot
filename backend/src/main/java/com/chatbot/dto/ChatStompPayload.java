@@ -18,6 +18,11 @@ public class ChatStompPayload {
         EDIT
     }
 
+    public enum ChatMode {
+        NORMAL,
+        DOCUMENT
+    }
+
     /** // EDIT FEATURE — NEW vs regeneration */
     private Type type;
 
@@ -42,6 +47,13 @@ public class ChatStompPayload {
     private Long sessionId;
 
     private Long documentId;
+
+    /**
+     * Explicit chat mode from the client. {@code NORMAL} ignores any document;
+     * {@code DOCUMENT} requires {@link #documentId} and uses the RAG pipeline.
+     * When null/missing, the server treats the request as {@code NORMAL}.
+     */
+    private ChatMode chatMode;
 
     /**
      * Client id of the user bubble for {@link Type#NEW} (pairs with {@link #messageId} for the assistant).
@@ -103,6 +115,14 @@ public class ChatStompPayload {
 
     public void setDocumentId(Long documentId){
         this.documentId = documentId;
+    }
+
+    public ChatMode getChatMode() {
+        return chatMode;
+    }
+
+    public void setChatMode(ChatMode chatMode) {
+        this.chatMode = chatMode;
     }
 
     public String getUserMessageId() {
