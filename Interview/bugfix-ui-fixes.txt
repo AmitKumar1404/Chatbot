@@ -1,0 +1,149 @@
+INTERVIEW PREPARATION
+Branch: bugfix/ui-fixes
+
+PROJECT CONTEXT
+Commit `b51bfb6` ka complete product diff `frontend/src/App.css` me `.bubble-text` par teen declarations hai: `max-width: 100%`, `min-width: 0`, `overflow-wrap: anywhere`. Goal narrow viewport clipping fix karna tha.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Flex item ka default `min-width: auto` overflow kyun kara sakta hai?
+
+Answer:
+Item apne min-content size se chhota shrink nahi hota; long unbreakable content parent se bahar push kar sakta hai.
+
+Q2. `min-width: 0` kya fix karta hai?
+
+Answer:
+Flex/grid item ko intrinsic min-content width ke neeche shrink allow karta hai, so container constraint apply ho sakta hai.
+
+Follow-up Q2.1: Kya `width: 100%` same fix hota?
+
+Answer:
+Guaranteed nahi. Intrinsic minimum width flex sizing ko still block kar sakti hai; `min-width:0` specifically shrink constraint release karta hai.
+
+Q3. `overflow-wrap: anywhere` aur `word-break` me kya difference hai?
+
+Answer:
+`overflow-wrap:anywhere` overflow avoid karne ke liye arbitrary break opportunity deta hai; `word-break` language/text breaking behavior ko more aggressively change kar sakta hai.
+
+Q4. `max-width: 100%` ka role kya hai?
+
+Answer:
+Bubble ko containing block se wider hone se cap karta hai; alone intrinsic shrink issue solve nahi karta, isliye `min-width:0` bhi important hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q5. Exact CSS change kya tha?
+
+Answer:
+`.bubble-text` me exactly `max-width:100%`, `min-width:0`, `overflow-wrap:anywhere` add hua. Koi JS/component/backend change nahi.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q6. JavaScript viewport calculation ke bajay CSS-only fix kyun better hai?
+
+Answer:
+Browser layout engine responsive constraints naturally solve karta hai; resize listeners, state churn aur width synchronization avoid hote hain.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q7. Long URL ab layout me kaise behave karega?
+
+Answer:
+Bubble container tak cap hogi, flex child shrink kar sakega aur unbroken URL ko anywhere wrap opportunity milegi.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q8. Existing `white-space: pre-wrap` ke saath new rules kaise interact karte hain?
+
+Answer:
+Authored whitespace/newlines preserve rehte hain, while unbreakable runs viewport overflow karne ke bajay wrap ho sakte hain.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q9. Kya Markdown table bhi automatically perfect ho jayegi?
+
+Answer:
+Guaranteed nahi. Tables/code blocks ko dedicated `overflow-x:auto` ya element-specific styling chahiye ho sakti hai.
+
+Q10. High zoom ya translated long words par kya verify karoge?
+
+Answer:
+200% zoom, narrow pane, long localized tokens aur keyboard focus ke saath clipping/horizontal scroll inspect karunga.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q11. CSS-only bug me error handling ka kya meaning hai?
+
+Answer:
+Runtime exception nahi; failure visual regression hai. Screenshot diff, devtools computed layout aur representative content fixtures diagnostic tools hain.
+
+SECTION 8 — SECURITY QUESTIONS
+
+N/A — pure layout declarations ne authentication, authorization, data exposure ya browser trust boundary change nahi ki.
+
+SECTION 9 — DATABASE QUESTIONS
+
+N/A — no entity, repository, migration or persistent state change.
+
+SECTION 10 — API / REST QUESTIONS
+
+N/A — no fetch, endpoint, request or response contract changed.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q12. Responsive regression test ka best fixture kya hoga?
+
+Answer:
+Narrow viewport me long URL, single long token, code block, GFM table, multiline whitespace aur normal paragraph compare karunga.
+
+Q13. Accessibility impact kya hai?
+
+Answer:
+Content viewport me readable rehna positive hai; zoom par hidden text/horizontal loss nahi hona chahiye. Wrapping se focus/order change nahi hota.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+N/A — no asynchronous state, event handler, WebSocket or concurrency behavior.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q14. Kya teen CSS declarations performance risk hain?
+
+Answer:
+Material runtime risk negligible hai. Huge message DOM separate concern hai; is commit ne JS layout loop add nahi kiya.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q15. Current test evidence kya hai?
+
+Answer:
+No visual regression test added. Cross-browser screenshots and computed overflow assertions useful additions honge.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q16. Rollout/rollback strategy kya hai?
+
+Answer:
+Small CSS-only change ko viewport matrix par verify karke ship; regression ho to single commit revert. Content-specific rules separately add karo.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q17. Is fix me sabse important declaration kaunsi ho sakti hai?
+
+Answer:
+Flex intrinsic sizing case me often `min-width:0`; lekin actual robust result teen rules ke combination se aata hai.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q18. Kya `6948e12` WebSocket reconnect fix is branch ka part hai?
+
+Answer:
+Nahi. `bugfix/ui-fixes` ownership `b51bfb6` CSS-only hai; reconnect lifecycle commit separate main-line change hai.
+
+SECTION 18 — RAPID REVISION
+
+Q19. Rapid recall?
+
+Answer:
+One file, three declarations, narrow bubble clipping fix, no JS/API/DB/realtime, no visual tests.

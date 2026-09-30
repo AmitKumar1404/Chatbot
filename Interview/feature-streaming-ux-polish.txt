@@ -1,0 +1,240 @@
+FEATURE/STREAMING-UX-POLISH — INTERVIEW PREPARATION
+Evidence: owned commit f3fb373; same tip as feature/redis-active-stream-registry alias; corresponding docs/diff/current source at a62003a.
+Scope note: Commit entered main through the Redis PR lineage. No automated tests were added. StreamingMessageRenderer.jsx exists but current live path does not import it.
+
+PROJECT CONTEXT
+===============
+Q1. Feature ka purpose?
+Answer:
+Reconnect behavior ko same-user multi-tab cases, stale socket events, heartbeat/disconnect cleanup, and partial rendering ke around stabilize karna. Core idea: backend stream principal-wide ho sakta hai, but browser tab ko explicitly prove karna chahiye ki incomplete assistant bubble uski own stream hai.
+
+Q2. Main changes?
+Answer:
+Branch-owned `f3fb373` changes:
+
+* `ChatApp` sessionStorage ownership record/helpers
+* Incomplete-message filtering and page-exit cleanup
+* WebSocket heartbeat/reconnect-limit changes
+* Backend disconnect-grace cleanup
+* `ChatWindow` rendering adjustments
+* New `StreamingMessageRenderer` file
+
+Inherited behavior ko separately credit karna chahiye: `clientStreamId` event matching/recovery guards `492d39c` lineage se aaye, aur current `websocket.js` ka `activeConnectionId` guard later `c291a9f` se aaya.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q3. sessionStorage kya advantage deta hai?
+Answer:
+State tab-scoped hoti hai and tab session tak survive karti hai. localStorage jaisa all-tabs sharing nahi, so same username ke parallel tabs me ownership mix-up reduce hota hai.
+
+Q4. Heartbeat ka role?
+Answer:
+Transport liveness detect karne me help karta hai. Heartbeat missed hone par disconnect lifecycle trigger ho sakti hai; heartbeat application message replay guarantee nahi karta.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q5. Ownership record me kya correlate hota hai?
+Answer:
+clientStreamId, assistantMessageId, sessionId and username/tab context. UI incomplete assistant row tabhi allow karti hai when persisted/current data owned record se match kare.
+
+Q6. StreamingMessageRenderer current status?
+Answer:
+f3fb373 ne component add kiya for incremental rendering/animation, but current main usage search me import/caller nahi. Interview me “file implemented” bolunga, “current production renderer” nahi; later ChatWindow ReactMarkdown path live hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q7. Username alone ownership kyun insufficient?
+Answer:
+Same authenticated user multiple tabs me different chats/streams चला सकता hai. Principal identity authorization deta hai, UI operation ownership nahi.
+
+Q8. localStorage kyun nahi?
+Answer:
+localStorage same origin ke tabs share karte hain, so one tab another tab ka stream owner dikh sakta hai. sessionStorage isolation desired behavior se align karta hai.
+
+Q9. window unload par backend stream cancel kyun nahi always?
+Answer:
+Unload unreliable hai and reconnect recovery may intentionally let generation continue. Cleanup should local socket/state hygiene and backend disconnect grace semantics distinguish kare.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q10. Stream start se completion flow?
+Answer:
+1. Start par `f3fb373` tab ownership metadata sessionStorage me save karta hai.
+2. Inherited event handler current `clientStreamId` aur optional assistant-message identity check karta hai.
+3. Later `activeConnectionId` logic stale WebSocket connection callbacks isolate karta hai; yeh `f3fb373`-owned change nahi hai.
+4. DB reconciliation incomplete row ko matching owned tab ke liye hi streaming dikhati hai.
+5. Done/cancel/terminal cleanup ownership clear karta hai.
+
+Q11. Disconnect cleanup?
+Answer:
+Backend session listener disconnected timestamp mark karta hai; reconnect onSessionConnect marker clear kar sakta hai. Scheduled cleanup grace period cross karne wale disconnected principals ke active work ko cancel karta hai.
+
+Q12. Incomplete assistant filtering kyun?
+Answer:
+Without filter, same user ka another tab persisted generationComplete=false row local active stream bubble ban sakta tha. allowIncompleteAssistant ownership predicate accidental cross-tab rendering reduce karta hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q13. Follow-up: sessionStorage write fail?
+Answer:
+Code private mode/storage failures catch/ignore karta hai. Safe behavior should be conservative: unproven incomplete stream render/claim na ho, while completed persisted messages still show.
+
+Follow-up Q13.1. Tab duplicate karne par?
+Answer:
+Browser duplicate semantics storage copy kar sakti hain, so perfect unique tab identity assume nahi karna. Add explicit random tabId and lease/heartbeat for stronger ownership.
+
+Q14. Follow-up: heartbeat scheduler dedicated kyun?
+Answer:
+Broker heartbeat tasks ko predictable scheduler chahiye. Scheduler sizing/daemon lifecycle production config concern hai; heartbeat alone distributed execution coordination nahi.
+
+Q15. Follow-up: stale done event?
+Answer:
+DONE event ka `clientStreamId` current active client stream se match hona chahiye. Agar event me `assistantMessageId` present hai aur current expected assistant ID bhi known hai, dono bhi match hone chahiye. DONE handler session ID compare nahi karta. Stale WebSocket connection callbacks ka separate `activeConnectionId` isolation later `c291a9f` behavior hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q16. Same user, same chat, two tabs?
+Answer:
+sessionStorage record each tab ko local owner context deta hai, but backend principal-wide active key may serialize/replace streams. Exact product policy explicit honi chahiye: one active stream per user versus per tab/session.
+
+Q17. Page refresh during stream?
+Answer:
+sessionStorage survives refresh in same tab, enabling recovery correlation. Current active endpoint/DB partial rows inherited reconnect behavior provide authoritative reconciliation.
+
+Q18. Partial Markdown fence mid-stream?
+Answer:
+Incremental parser temporarily incomplete syntax dekh sakta hai. Renderer should tolerate incomplete fences and avoid unsafe raw HTML. Current dead renderer path ko active guarantee nahi bolunga.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q19. Malformed ownership JSON?
+Answer:
+Read helper parse failure par null/safe fallback return kare; stale key clear useful hai. App crash ya another tab claim avoid hona primary invariant hai.
+
+Q20. WebSocket error repeatedly fire ho?
+Answer:
+Current main me later `c291a9f` ka `activeConnectionId` stale connection callbacks isolate karta hai; is guard ko `f3fb373` ka owned change nahi kehna chahiye.
+
+`f3fb373` ne reconnect-attempt limit aur heartbeat behavior add kiya. Production improvement ke liye exponential backoff, jitter, metrics, aur clear user-visible terminal state useful hain.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q21. sessionStorage ownership security boundary hai?
+Answer:
+Nahi. User-controlled browser metadata authorization proof nahi. Backend authenticated principal and owner-scoped repositories remain security boundary. Ownership record UX/correlation guard hai.
+
+Q22. Markdown security?
+Answer:
+Raw HTML sanitization policy important hai. React escaping/Markdown library configuration verify karni hogi; dead component existence ko XSS safety evidence nahi maanunga.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q23. Database changes?
+Answer:
+N/A for f3fb373: no schema/migration. It consumes reconnect branch ke persisted incomplete message state.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q24. New REST API?
+Answer:
+N/A. No new endpoint. Existing /api/v1/chat/stream/active and message APIs inherited recovery flow me consumed hote hain.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q25. Refs versus state?
+Answer:
+Refs async callbacks ko latest identity immediately read karne deti hain without rerender; state UI rendering drive karti hai. Duplicated sources drift na karein, so transition helpers centralized hone chahiye.
+
+Q26. Renderer improvement?
+Answer:
+Unused StreamingMessageRenderer remove or integrate with tests; one Markdown path own karo, memoization/profile karo, stable message IDs use karo, and completed versus streaming render behavior explicitly test karo.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q27. Core race kya hai?
+Answer:
+Possible concurrent actors:
+
+* old socket callback
+* new reconnect
+* DB recovery poll
+* user STOP
+
+Inherited correlation IDs aur branch-owned tab-ownership checks stale effects reduce karte hain. Current main ka connection-instance guard later commit se aata hai; exactly-once guarantee nahi hai.
+
+Q28. Is system fully multi-instance?
+Answer:
+Nahi. f3fb373 mostly browser/backend lifecycle polish hai. Later e844265 Redis metadata share karta hai, but Reactor Disposable and simple broker/process execution remain local.
+
+Q29. Exactly-once event delivery?
+Answer:
+Evidence nahi. STOMP reconnect and client guards duplicate/stale impact reduce karte hain; exactly-once needs durable IDs, dedup store and acknowledgment/replay design.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q30. Frontend performance risks?
+Answer:
+Every chunk rerender, Markdown reparsing, animation timers, and message-array merges. No benchmark exists. Throttle/batch rendering and profiler measurements appropriate next steps hain.
+
+Q31. Heartbeat overhead?
+Answer:
+Small periodic frames and scheduler work. Too aggressive interval load/noise increase, too slow failure detection delay. Tune with production metrics.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q32. Existing tests?
+Answer:
+Owned commit me automated tests nahi.
+
+Q33. Critical E2E matrix?
+Answer:
+Same user two tabs, different chats, refresh mid-stream, old done event, offline/online, storage unavailable, tab duplicate, unload/reopen, heartbeat timeout, and partial Markdown.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q34. Stronger ownership design?
+Answer:
+Random tab/operation ID plus server-issued lease, ownerInstanceId enforcement, lease renewal/expiry, durable event offset, and distributed broker. Browser sessionStorage remains hint, not authority.
+
+Q35. Observability?
+Answer:
+Stale-event drops, ownership mismatches, reconnect attempts, heartbeat timeout, recovery duration, storage failures, and orphan incomplete rows—without logging JWT or private message content.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q36. Trick: feature name says UX polish, only CSS?
+Answer:
+Nahi. It includes backend heartbeat/disconnect cleanup and correctness guards. Name understates concurrency/lifecycle work.
+
+Q37. Trick: alias means two separate commits?
+Answer:
+Nahi. f3fb373 is same tip as feature/redis-active-stream-registry alias; Redis branch inherited it before e844265.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q38. Reconnect branch relation?
+Answer:
+`339d9d7`/`492d39c` foundation active endpoint, partial persistence, recovery, aur client-stream event matching laayi. `f3fb373` ne tab ownership, heartbeat/reconnect limits, disconnect grace, aur incomplete-row rendering hardening add ki. Current `activeConnectionId` callback guard later `c291a9f` se aaya.
+
+Q39. Redis branch relation?
+Answer:
+f3fb373 entered via Redis PR lineage; e844265 separately externalized active/disconnect metadata. Do not credit Redis implementation to f3fb373.
+
+Q40. Multi-user login relation?
+Answer:
+Both use sessionStorage but for different keys/goals: f3fb373 stream ownership; ba1f78a auth token tab isolation.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q41. Six facts?
+Answer:
+* Owner commit: `f3fb373`
+* Same-tip alias: `feature/redis-active-stream-registry`
+* Main entry: Redis PR lineage
+* Tab ownership: sessionStorage
+* Branch-owned lifecycle work: heartbeat, reconnect limit, disconnect grace, incomplete-row filtering
+* `StreamingMessageRenderer` file exists but current live path does not import it
+
+Q42. Closing line?
+Answer:
+“Is branch me principal authentication aur tab-level operation ownership ko separate kiya, sessionStorage ownership se cross-tab incomplete rendering harden ki, aur inherited stream-correlation guards ke saath integrate kiya. Current limitation yeh thi ki renderer file live path me unused aur distributed execution incomplete tha.”

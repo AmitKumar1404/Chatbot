@@ -1,0 +1,205 @@
+FIX/MULTI-USER-LOGIN — INTERVIEW PREPARATION
+Evidence: fix-owned commit ba1f78a; corresponding docs, diff, and current source at a62003a.
+Scope note: Actual code change only AuthContext token reads/writes/removes from localStorage to sessionStorage. Search-dialog commit 51ad3cc is inherited ancestry. No automated multi-tab test.
+
+PROJECT CONTEXT
+===============
+Q1. Bug kya tha?
+Answer:
+localStorage origin-wide shared tha, so same browser ke separate tabs ek access token share karte the. User A and User B ko independent tabs me login karna expected tha, but token overwrite/logout cross-tab identity mix-up create kar sakta tha.
+
+Q2. Fix kya tha?
+Answer:
+Same token key ke AuthContext bootstrap, login set, invalid-token cleanup and logout remove operations sessionStorage par switch kiye. Backend/API/DB unchanged.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q3. localStorage vs sessionStorage?
+Answer:
+localStorage same origin tabs/windows me shared and persistent hota hai. sessionStorage tab browsing context scoped hota hai and tab session close tak रहता है, though duplicated-tab behavior browser-dependent/copy-like ho sakta hai.
+
+Q4. Kya sessionStorage secure hai?
+Answer:
+It improves isolation, confidentiality against XSS nahi. JavaScript-readable token malicious injected script read kar sakta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q5. Kaun sa file changed?
+Answer:
+frontend/src/context/AuthContext.jsx only. ba1f78a me five localStorage calls equivalent sessionStorage calls me swapped hue.
+
+Q6. Auth bootstrap kaise work karta hai?
+Answer:
+Provider tab storage se token read karta hai, auth state initialize/validate flow chalata hai, login par token store karta hai, and logout/invalid path par same tab key remove karta hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q7. Key ko username se namespace kyun nahi?
+Answer:
+One tab me one current identity model ke liye tab-scoped single key simpler hai. localStorage username namespace still active-current-user coordination and token exposure create karta.
+
+Q8. HttpOnly cookie kyun nahi in this fix?
+Answer:
+That needs backend cookie issuance, CSRF strategy, CORS/SameSite/refresh changes. ba1f78a targeted minimal frontend tab-isolation fix. HttpOnly cookie stronger XSS token-theft mitigation follow-up hai.
+
+Q9. In-memory only token kyun nahi?
+Answer:
+More XSS-resilient persistence profile but refresh loses login unless refresh cookie/backend flow. sessionStorage balances tab refresh persistence and tab isolation.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q10. Two-tab scenario trace?
+Answer:
+Tab A sessionStorage token A stores; Tab B has separate storage and token B stores. Each AuthContext API/STOMP calls apna token use karte hain. Tab A logout only A key remove karta hai.
+
+Q11. Page refresh?
+Answer:
+Same tab sessionStorage survives refresh, so provider token restore kar sakta hai. Tab/window close par session ends and token normally removed by browser.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q12. Follow-up: duplicated tab?
+Answer:
+Some browsers duplicated tab ko initial sessionStorage copy de sakte hain; after duplication storage contexts independent ho sakte hain. Therefore “always blank new tab” guarantee nahi.
+
+Follow-up Q12.1. New tab opened with window.open?
+Answer:
+Opener/session behavior browser rules par depend kar sakta hai. Sensitive isolation requirement automated browser tests se verify karunga and noopener policy consider karunga.
+
+Q13. Follow-up: token expires?
+Answer:
+sessionStorage expiry validate nahi karta. Backend rejects expired JWT; frontend invalid-token path state/key clear kare. Refresh-token behavior later feature hai, ba1f78a ka part nahi.
+
+Q14. Follow-up: logout all tabs?
+Answer:
+This fix intentionally per-tab logout deta hai. Global logout requirement ho to server revocation plus BroadcastChannel/storage-independent signal needed.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q15. User manually token edit kare?
+Answer:
+Client state trusted authority nahi. Backend signature/expiry validates; invalid token cleanup and login redirect expected.
+
+Q16. Storage unavailable?
+Answer:
+Browser policy/private mode operation throw kar sakta hai. Graceful unauthenticated fallback needed; current change ko robust storage exception handling guarantee nahi bolunga.
+
+Q17. Tab crash/reopen?
+Answer:
+sessionStorage usually lost after browsing context closes, so login required unless separate refresh mechanism. This is expected trade-off.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q18. Login API success but storage set fail?
+Answer:
+UI token memory/storage state inconsistent ho sakti hai. Store error catch, auth state rollback, and user feedback stronger handling hai.
+
+Q19. 401 response?
+Answer:
+Current tab token/auth state clear and redirect/login flow trigger hona chahiye. Another tab's valid session should remain unaffected.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q20. Threat model improvement?
+Answer:
+Accidental cross-tab user identity sharing reduce. XSS, token replay, compromised browser extension, and server revocation problems remain.
+
+Q21. Stronger auth storage?
+Answer:
+Short-lived access token in memory plus Secure HttpOnly SameSite refresh cookie, CSRF controls, refresh rotation/revocation, CSP and dependency hygiene.
+
+Q22. Token logging?
+Answer:
+Never console/server logs me raw JWT. Storage change secrets-handling discipline replace nahi karta.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q23. Database impact?
+Answer:
+N/A. No entity/repository/migration. Token browser storage location only.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q24. API change?
+Answer:
+N/A. Login/logout endpoint contract unchanged. Existing bearer token requests continue.
+
+Q25. Backend still necessary kyun?
+Answer:
+Client storage only credential transport state hai. Backend JWT validation and resource owner checks authoritative hain.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q26. AuthContext centralization benefit?
+Answer:
+Bootstrap, login, logout and consumers same storage policy use karte hain; partial localStorage/sessionStorage mix avoid hota hai.
+
+Q27. Improvement?
+Answer:
+Storage adapter abstraction, exception-safe get/set/remove, explicit AUTHENTICATING/AUTHENTICATED/ANONYMOUS states, and no token prop drilling.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q28. WebSocket effect?
+Answer:
+Each tab AuthContext token STOMP CONNECT me use karta hai, so tab identity isolation REST and socket both me consistent rehni chahiye. ba1f78a websocket code directly change nahi karta.
+
+Q29. Race: logout while request pending?
+Answer:
+Pending request old token carry kar sakti hai. Abort requests/socket disconnect on logout and ignore stale response by auth generation ID.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q30. Performance impact?
+Answer:
+Negligible synchronous small storage operations. No benchmark needed/available; large payload sessionStorage me store nahi karna, only token.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q31. Existing tests?
+Answer:
+Owned commit me automated multi-tab test nahi.
+
+Q32. Required tests?
+Answer:
+Two browser contexts Users A/B, independent refresh, per-tab logout, expired token cleanup, duplicated tab, storage exception, REST and STOMP identity, and XSS policy checks.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q33. Production solution?
+Answer:
+Tab isolation requirement retain, but tokens HttpOnly cookie/short-lived memory model me move; server revocation and global/per-tab logout semantics explicit; CSP and monitoring add.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q34. Trick: sessionStorage means different users can never mix?
+Answer:
+It removes shared storage cause, but application bugs, duplicated tab initial copy, stale sockets, or backend authorization bugs still mix-up risk rakhte hain.
+
+Q35. Trick: this branch added search dialog?
+Answer:
+No. 51ad3cc inherited commit tha. ba1f78a actual fix only AuthContext storage swap hai.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q36. Search-dialog merge history?
+Answer:
+51ad3cc multi-user-login PR ancestry ke through main me aaya, so PR contents and fix ownership same nahi. Git unique commit/file diff inspect karna zaroori hai.
+
+Q37. Streaming ownership sessionStorage se same hai?
+Answer:
+Mechanism similar but data/purpose different. f3fb373 stores stream ownership; ba1f78a stores auth token.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q38. Five facts?
+Answer:
+Owner ba1f78a; one file AuthContext.jsx; localStorage→sessionStorage; per-tab auth isolation; no API/DB; no automated test.
+
+Q39. Biggest limitation?
+Answer:
+Token still JavaScript-readable, so XSS protection improve nahi hui.
+
+Q40. Closing line?
+Answer:
+“Maine bug ko origin-wide credential storage tak trace karke minimal tab-scoped fix kiya, while clearly separating isolation from security: sessionStorage cross-tab overwrite solve karta hai, XSS nahi.”

@@ -1,0 +1,144 @@
+FEATURE: MESSAGE COPY — INTERVIEW PREPARATION
+Evidence: commit da9383e, corresponding documentation, and the commit snapshot.
+
+PROJECT CONTEXT
+This small frontend branch added copy actions to user and assistant bubbles in `ChatWindow.jsx`. `handleCopy(text, id)` uses the browser Clipboard API, records `copiedId`, and clears that visual state after 1500 ms. It also added `lucide-react` icons and exposed existing edit controls. It did not add Markdown rendering, backend APIs, database changes, or tests.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Clipboard feature ka general concept kya hai?
+Answer: Browser ki `navigator.clipboard.writeText()` API text ko system clipboard me asynchronously write karti hai. Promise resolve hona actual success signal hai.
+
+Q2. React list me item-specific transient feedback kaise model karte hain?
+Answer: Single boolean ke badle active item ki stable ID state me rakhte hain. Render ke waqt har item apni ID compare karke copied/success state dikha sakta hai; timer se transient state reset ki ja sakti hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q3. `handleCopy` ke inputs aur side effects kya hain?
+Answer: Inputs message text aur message id hain. Yeh clipboard write karta hai, success par `copiedId` set karta hai, phir timer se null karta hai; failure par console error log hota hai.
+
+Follow-up: Copy kis bubbles par available hai?
+Answer: User bubble par action always render hota hai. Assistant bubble par sirf non-empty aur non-streaming content ke liye render hota hai.
+
+Follow-up: Is branch ne exactly kya add kiya, aur kya Markdown copy hota hai?
+Answer: `ChatWindow` me Copy button, `copiedId` state, Copy/Check feedback, aur 1500 ms reset timer add hua. Commit plain `msg.content` copy karta hai; Markdown parser ya formatter is branch ka part nahi hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q4. Copy browser me hi kyun rakha, backend me kyun nahi?
+Answer: Clipboard client device resource hai; backend round-trip se value nahi milti. Client-side implementation faster aur privacy boundary ke closer hai.
+
+Follow-up: Global state kyun nahi?
+Answer: `copiedId` temporary, screen-local feedback hai. Shared persistence ki requirement nahi thi, isliye component state sufficient hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q5. Click se feedback reset tak flow batao.
+Answer: Button `onCopy(msg.content, msg.id)` call karta hai; `await navigator.clipboard.writeText(text)` ke baad id state me aati hai; tooltip “Copied” hota hai; mobile-width check par Check icon dikhta hai; 1500 ms baad state clear hoti hai.
+
+Follow-up: `useCallback` ka role kya hai?
+Answer: Empty dependency list ke saath stable handler reference milta hai, jo memoized child bubbles ko unnecessary prop-identity changes se bachata hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q6. Interviewer pooche ki visual feedback message-specific kaise hai?
+Answer: Single boolean ke badle message id store hoti hai. Render time par `copiedId === msg.id` compare hota hai.
+
+Follow-up: Ek message copy karke turant doosra copy karein to?
+Answer: State doosre id par chali jayegi, lekin pehla timer bhi active rahega aur jaldi state clear kar sakta hai. Timer cancellation current code me nahi hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q7. Empty text ya streaming assistant par kya hoga?
+Answer: Assistant action `msg.content?.trim()` aur `!msg.streaming` se gated hai. User action ke liye separate empty-text guard evidence nahi hai.
+
+Q8. Clipboard permission deny ho to?
+Answer: Promise reject hoti hai aur catch me `console.error("Copy failed", err)` chalta hai. User-visible failure message current implementation me nahi hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q9. Current error handling ki limitation kya hai?
+Answer: Failure sirf console me dikhti hai; retry, fallback `execCommand`, toast, ya accessible error announcement implement nahi hai.
+
+Follow-up: Production improvement?
+Answer: Rejection par visible status, optional manual-selection fallback, aur timer cleanup add karunga.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q10. Clipboard use me security concern kya hai?
+Answer: User-triggered copy hi hona chahiye aur sensitive content accidentally copy ho sakta hai. Branch clipboard read nahi karti aur server ko clipboard data send nahi karti.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q11. Is branch me database ka kya role hai?
+Answer: Applicable nahi hai. Copy operation browser-only hai; commit me entity, repository, migration, ya persistence change nahi hua.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q12. Kya koi REST ya STOMP contract change hua?
+Answer: Nahi. Existing rendered message text consume hua; network API change is commit me nahi hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q13. `memo` aur stable props yahan kyun useful hain?
+Answer: Message list streaming updates ke time frequently rerender ho sakti hai. Memoized bubbles aur stable callback unchanged rows ke avoidable rerenders reduce kar sakte hain.
+
+Follow-up: `window.innerWidth` render me read karne ki limitation?
+Answer: Resize-reactive state nahi hai aur SSR environment me `window` unavailable ho sakta hai. Responsive CSS ya media-query hook safer improvement hoga.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q14. Is branch me backend concurrency applicable hai?
+Answer: Nahi. Relevant race sirf overlapping browser timers aur message rerenders ka hai; DB locks ya stream registry is branch ke changes nahi hain.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q15. Performance impact kya hai?
+Answer: Clipboard call aur one timer lightweight hain. Main concern large message list rerender hai, jise existing `memo` aur `useCallback` partially address karte hain.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q16. Actual test evidence kya hai?
+Answer: Commit ne koi frontend test add nahi kiya; repository evidence “no frontend tests” hai.
+
+Follow-up: Kaunse tests add karoge?
+Answer: Clipboard resolve/reject mocks, user/assistant visibility, streaming assistant suppression, copied-id feedback, fake-timer reset, rapid double-copy, aur unmount cleanup test karunga.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q17. Is feature ko production-ready kaise banaoge?
+Answer: Accessible `aria-live` feedback, timer ref cleanup, rapid-copy timer replacement, clipboard-unavailable fallback, aur component tests add karunga.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+OWNERSHIP / EVIDENCE SUBSECTION
+
+Q18. Is branch ki factual ownership boundary kya hai?
+Answer: `da9383e` clipboard UI, copied-state feedback, icons, action rendering, aur edit-control exposure own karta hai; backend, persistence, streaming contract, aur Markdown rendering nahi.
+
+TRICK / CROSS SUBSECTION
+
+Q19. Kya icon change copy success prove karta hai?
+Answer: Icon sirf awaited clipboard promise resolve hone ke baad change hota hai, so browser-reported success show karta hai; OS clipboard ke later mutation ki guarantee nahi.
+
+Q20. Kya edit feature bhi isi commit me create hua?
+Answer: Commit ne edit controls ko UI me expose/style kiya, lekin edit/regeneration flow previous stream-stop work se inherited tha. Ownership overclaim nahi karna chahiye.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q21. Yeh branch stream-stop branch par kaise depend karti hai?
+Answer: `ChatWindow` ka message shape, streaming flag, aur edit callbacks inherited hain. Message-copy ka owned behavior clipboard UI tak limited hai.
+
+Follow-up: Later Markdown support ko is branch se attribute karoge?
+Answer: Nahi. `da9383e` me plain paragraph rendering aur raw content copy verified hai.
+
+Q22. Later branches merge hone par regression risk kya hai?
+Answer: Chat bubble refactor copy button visibility, message ids, ya memo props tod sakta hai. Cross-branch component tests useful honge.
+
+SECTION 18 — RAPID REVISION
+- Owner commit: `da9383e`.
+- Core method: `ChatWindow.handleCopy(text, id)`.
+- API: `navigator.clipboard.writeText`.
+- Feedback: `copiedId`, 1500 ms timer.
+- Scope: frontend only; no REST, DB, backend, Markdown, or tests.
+- Main gaps: visible error feedback, timer cancellation/cleanup, responsive `window` handling.

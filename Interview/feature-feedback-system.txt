@@ -1,0 +1,401 @@
+INTERVIEW PREPARATION
+Branch: feature/feedback-system
+
+PROJECT CONTEXT
+===============
+Purpose: Assistant messages par HELPFUL/NOT_HELPFUL feedback, optional reason, history restoration, optimistic UI aur aggregate analytics.
+Evidence: commits 9d27224, 70a7783, 86ef17c, 5feee3b, abf7f70, ce64dc1, 7b5742c, 93e5452, 1c3e913. Ye behavior main me merged hai. Commit 4185ea6 branch-tip-only hai: strict reason validation, reason history restoration, unreadable-enum handling aur Postman sync; current main me nahi.
+Key files: MessageFeedbackServiceImpl, ChatServiceImpl.withFeedback, MessageFeedbackController, FeedbackAnalyticsController, ChatWindow, FeedbackButtons, FeedbackReasonModal, V7, V8.
+Evidence limit: Main/merged feedback behavior ke dedicated automated tests nahi mile. Historical intent sirf commit/source se infer kiya gaya hai; unsupported guarantees claim nahi kiye gaye.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q1. Message feedback feature kya solve karta hai?
+Answer: User har completed assistant message ko HELPFUL ya NOT_HELPFUL mark kar sakta hai. General concept quality signal collect karna hai; project me signal user-message pair par persist hota hai aur history me selection restore hoti hai. Potential improvement: feedback ko model/version, latency aur prompt metadata se correlate karke quality analysis richer ho sakta hai.
+
+Follow-up Q1.1. Session-level rating kyun nahi?
+Answer: Message-level rating exact bad response identify karta hai. Session rating simpler hoti, lekin kis answer me issue tha woh lose ho jata.
+
+Q2. Branch lineage ka precise answer kya hai?
+Answer: 9d27224 se 1c3e913 tak implementation main me PR #33 se merged hai. 4185ea6 main ka part nahi; use current-main behavior bolna factually wrong hoga.
+
+Follow-up Q2.1. Tip-only delta kya hai?
+Answer: NOT_HELPFUL reason requirement/validation, history DTO me reason restoration aur malformed feedbackReason ke controlled 400 handling ka stricter patch.
+
+Q3. Feedback ke core enums kya hain?
+Answer: MessageFeedbackType me HELPFUL aur NOT_HELPFUL. FeedbackReason separate enum hai. V7 type ko DB CHECK se bound karta hai; V8 reason column add karta hai, lekin reason ka DB CHECK nahi.
+
+Q4. Upsert ka meaning kya hai?
+Answer: Same user aur same message par first request insert, later request existing row update karti hai. Project implementation pehle find karti hai, phir entity create/update karke save karti hai.
+
+Follow-up Q4.1. Kya yeh atomic database upsert hai?
+Answer: Nahi. Yeh read-then-write application upsert hai; concurrent first inserts me race ho sakti hai. Unique constraint final invariant hai, graceful conflict handling nahi.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q5. MessageFeedbackServiceImpl.upsertFeedback ka flow batao.
+Answer:
+1. SecurityContext se current authentication resolve hota hai.
+2. Username se User load hota hai.
+3. messageId se Message load hota hai.
+4. Message ke chat-session owner ko current user se compare kiya jata hai.
+5. generationComplete false ho to reject hota hai.
+6. HELPFUL ke liye reason null force hota hai; NOT_HELPFUL ke liye request reason liya jata hai.
+7. Existing (messageId,userId) row update ya naya entity build hota hai.
+8. Transaction me save karke messageId aur feedbackType response hota hai.
+
+Follow-up Q5.1. Main me NOT_HELPFUL reason mandatory hai?
+Answer: Nahi. Main 1c3e913 tak reason UI provide karta hai, par strict backend requirement tip-only 4185ea6 hai.
+
+Q6. Feedback history kaise restore hoti hai?
+Answer: ChatServiceImpl.withFeedback message IDs batch karta hai, current user ke feedback rows ek query me leta hai aur ChatMessageResponse me feedbackType map karta hai. Main me reason restoration absent hai; 4185ea6 tip par add hoti hai.
+
+Follow-up Q6.1. Batch query ka benefit?
+Answer: Har message ke liye repository call karne wale N+1 pattern ko avoid karta hai.
+
+Q7. Analytics service kya return karti hai?
+Answer: Repository countByFeedbackType se helpful aur notHelpful counts, phir total calculate karke FeedbackStatsResponse return hota hai.
+
+Q8. Frontend interaction ka high-level flow?
+Answer: HELPFUL direct submit hota hai; NOT_HELPFUL reason modal open karta hai. submitFeedback previous UI state capture karta hai, optimistic selection set karta hai, API call karta hai aur failure par rollback karta hai.
+
+Follow-up Q8.1. Duplicate guard kya karta hai?
+Answer: Same selected feedback ko unnecessary re-submit hone se rokta hai. Yeh server idempotency ya concurrent race ka replacement nahi.
+
+Q9. Effective feedback endpoint kya hai?
+Answer: Controller mapping PUT /chat/messages/{id}/feedback aur servlet context /api/v1 milkar effective PUT /api/v1/chat/messages/{id}/feedback banate hain.
+
+Q10. Effective analytics endpoint me issue kya hai?
+Answer: Controller mapping already /api/v1/admin/feedback/stats hai aur context path bhi /api/v1, isliye effective path /api/v1/api/v1/admin/feedback/stats hai. Naam admin hai, par role-based admin guard evidence nahi.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q11. Separate feedback table kyun?
+Answer: General concept me feedback user-specific relation hai, Message ka single scalar nahi. Project me same message/user uniqueness, timestamps aur future metadata isolate hote hain. Potential improvement: audit/history chahiye to overwrite ke bajay append-only events rakhe ja sakte hain.
+
+Q12. Message entity me helpfulCount kyun nahi?
+Answer: Counter source-of-truth lose karta, per-user update/authorization difficult hoti aur decrement/change race aati. Derived aggregate safer hai, though large scale par materialized aggregate useful ho sakta hai.
+
+Q13. PUT kyun, POST kyun nahi?
+Answer: User-message pair ka desired state replace/update hota hai, so idempotent intent ke liye PUT suitable hai. Current read-then-write race ki wajah se implementation-level idempotency perfect nahi.
+
+Q14. Optimistic UI kyun?
+Answer: Feedback action low-latency feel hota hai. Project rollback failure consistency restore karta hai. Potential improvement: request version/AbortController se out-of-order responses guard karna.
+
+Q15. Reason HELPFUL par null kyun?
+Answer: Current domain reasons negative-quality categories hain. Stale negative reason ko HELPFUL switch par clear karna contradictory state prevent karta hai.
+
+Follow-up Q15.1. Positive reason future me chahiye to?
+Answer: Reason taxonomy ko sentiment/type-compatible mapping ya separate positive/negative enums me model karunga.
+
+Q16. Analytics controller ko admin naam dena enough kyun nahi?
+Answer: URL naming authorization nahi hoti. SecurityConfig me authority/role rule ya method-level @PreAuthorize chahiye.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q17. End-to-end feedback write flow trace karo.
+Answer:
+1. FeedbackButtons click capture karta hai.
+2. NOT_HELPFUL ho to modal reason collect karta hai.
+3. ChatWindow optimistic local state update karta hai.
+4. chatApi PUT request bearer token ke saath bhejta hai.
+5. Security filter principal establish karta hai.
+6. Controller @Valid request service ko deta hai.
+7. Service ownership/completion enforce karke transactional save karti hai.
+8. Success UI retain karta hai; failure previous state restore karta hai.
+
+Q18. History read flow trace karo.
+Answer:
+1. Chat messages owner-scoped session se fetch hote hain.
+2. withFeedback message IDs collect karta hai.
+3. Current user ke matching feedback batch me query hote hain.
+4. Map by message ID banta hai.
+5. DTO me persisted feedbackType attach hota hai.
+6. Frontend DB DTO ko UI message state me map karta hai.
+
+Q19. Reason modal keyboard behavior?
+Answer: `FeedbackReasonModal` ka keydown handler sirf Escape par `onClose()` call karta hai. Enter-key submission handler aur focus trap implement nahi hain.
+
+Production improvement:
+Initial focus, tab focus trap, Enter behavior where appropriate, opener par focus return, aur automated keyboard-accessibility tests add karne chahiye.
+
+Q20. Transaction boundary kya cover karti hai?
+Answer: upsertFeedback ka DB read/update/save transaction cover hota hai. Frontend optimistic state aur network request transaction ka part nahi.
+
+Q21. Timestamps ka behavior?
+Answer: Insert par createdAt aur updatedAt same Instant; update par updatedAt refresh hota hai, createdAt retain hota hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q22. Interviewer bole “one feedback per message” — correction?
+Answer: Exact invariant one feedback per (message_id,user_id) hai, globally one per message nahi.
+
+Q23. Kya user kisi aur user ke message par feedback de sakta hai?
+Answer: Service chatSession.user.id compare karke reject karti hai. Sirf client-side hiding par trust nahi hai.
+
+Q24. Kya incomplete streaming answer rate ho sakta hai?
+Answer: Nahi; generationComplete check domain guard hai. Isse partial answer quality signal accidentally persist nahi hota.
+
+Q25. MessageFeedbackResponse reason kyun restore nahi karti?
+Answer: Main response DTO only messageId/type return karta hai. History reason bhi main par absent hai; tip patch gap close karta hai. Exact historical motive documented nahi.
+
+Q26. Existing feedback ko opposite type me change kar sakte hain?
+Answer: Haan, same row update hoti hai. HELPFUL switch reason clear karta hai.
+
+Q27. Delete feedback endpoint hai?
+Answer: Evidence me explicit delete endpoint nahi. User selection replace kar sakta hai; “clear feedback” contract N/A.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q28. Do simultaneous first submissions aaye to?
+Answer: Dono find me empty dekh sakte hain; ek insert win karega, doosra V7 unique constraint violate kar sakta hai. Improvement: INSERT ... ON CONFLICT DO UPDATE aur conflict-specific response.
+
+Q29. Same feedback rapid double-click?
+Answer: Frontend pending/duplicate guard requests reduce karta hai, par distributed clients ko prevent nahi karta. DB unique duplicate rows rokta hai.
+
+Q30. Out-of-order update responses?
+Answer: Request A aur B overlap karein to slower A UI/server state ko surprising bana sakta hai. Current code me request sequence evidence nahi; improvement latest-request token ya disable-until-complete.
+
+Q31. Message request ke baad delete ho jaye?
+Answer: FK/cascade and transaction ordering par save fail/not-found ho sakta hai. Controlled 404/409 mapping better hoga; current RuntimeException broadly 400 map hoti hai.
+
+Q32. Feedback row ke baad message/user delete ho?
+Answer: V7 dono foreign keys ON DELETE CASCADE use karta hai, so feedback orphan nahi rahta.
+
+Q33. Invalid feedbackType string aaye?
+Answer: Jackson deserialization validation se pehle fail kar sakti hai. Main generic exception behavior par depend karta hai; tip 4185ea6 unreadable input ko bounded 400 deta hai.
+
+Q34. NOT_HELPFUL without reason?
+Answer: Current main accept kar sakta hai. Tip-only stricter implementation reject karti hai. Interview me branch-tip aur main clearly separate bolna hai.
+
+Q35. HELPFUL with reason?
+Answer: Service reason null force karti hai; stale/incompatible reason persist nahi hota.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q36. Domain errors ka current HTTP mapping?
+Answer: Message missing, ownership mismatch aur incomplete message RuntimeException hain; current GlobalExceptionHandler RuntimeException ko 400 map karta hai. Semantically missing=404 aur forbidden=403 zyada precise ho sakte hain.
+
+Q37. Optimistic API failure ka UI behavior?
+Answer: Previous feedback state restore hota hai aur pending state clear honi chahiye. Improvement: visible retry/error toast aur response ordering guard.
+
+Q38. Database outage par?
+Answer: Transaction rollback hota hai, API failure frontend rollback trigger karti hai. Automatic retry evidence nahi; blind retry duplicate/update ordering risk la sakta hai.
+
+Q39. Tip handler raw parser error expose karta hai?
+Answer: Nahi; 4185ea6 cause/path inspect karke controlled invalid-feedback message deta hai, raw stack trace body me nahi.
+
+Q40. Analytics query fail ho to?
+Answer: Repository exception global handler tak propagate hogi. Cached/stale fallback evidence nahi.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q41. Primary authorization invariant?
+Answer: Authenticated user aur message ke chat-session owner IDs match hone chahiye.
+
+Q42. IDOR kaise mitigate hua?
+Answer: Arbitrary messageId accept hone ke baad server ownership verify karta hai. Guessable IDs alone access grant nahi karte.
+
+Q43. Analytics security gap?
+Answer: Route authenticated hai, lekin admin RBAC absent. Koi authenticated user aggregate counts access kar sakta hai.
+
+Follow-up Q43.1. Fix?
+Answer: hasRole/hasAuthority policy, @PreAuthorize, least-privilege admin claim aur authorization integration tests.
+
+Q44. Feedback text/XSS concern?
+Answer: Type/reason enums free text nahi, so stored-XSS surface low. Generic message content security separate concern hai.
+
+Q45. Privacy concern?
+Answer: Feedback user identity se linked hai. Retention, purpose disclosure, deletion/export aur analytics access policy production requirements hain; current implementation me evidence N/A.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q46. V7 schema ke important constraints?
+Answer: BIGSERIAL key; message_id/user_id FKs with cascade; feedback_type VARCHAR(20); UNIQUE(message_id,user_id); CHECK type IN (HELPFUL,NOT_HELPFUL); timestamps.
+
+Q47. V8 kya add karta hai?
+Answer: Nullable feedback_reason VARCHAR(30). Enum compatibility application par depend karti hai; DB check absent.
+
+Q48. Global uniqueness kyun composite hai?
+Answer: Same assistant message theoretically one owner ka hai, phir bhi user_id explicit tenant boundary/audit relation deta hai. Constraint service model ko enforce karta hai.
+
+Q49. Analytics indexing concern?
+Answer: Type counts full/partial scan kar sakte hain; V7 user index analytics type count optimize nahi karta. Scale par feedback_type index/materialized aggregates evaluate karenge.
+
+Q50. Migration rollback?
+Answer: Flyway forward-only practice me corrective migration safer hai. V8 column remove karna data loss hai; production rollback plan application compatibility ke saath hona chahiye.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q51. PUT request shape?
+Answer: Path message id; body me feedbackType aur optional feedbackReason. Exact enum strings expected hain. Authentication required.
+
+Q52. Success code?
+Answer: Controller evidence 200 response DTO. Create-vs-update distinction expose nahi hota.
+
+Q53. Better API errors kaise?
+Answer: Stable code, timestamp, safe message, field errors; ownership 403/404 strategy; incomplete 409; malformed enum 400. Current broad RuntimeException mapping coarse hai.
+
+Q54. Analytics double prefix ka root cause?
+Answer: Servlet context /api/v1 aur controller-level /api/v1 dono concatenate hote hain. Fix controller ko /admin/feedback/stats karna, clients/versioning test update karna.
+
+Q55. DELETE/GET single feedback API?
+Answer: Explicit endpoint evidence N/A. History response selection read path provide karti hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q56. Optimistic state ka rollback data kya hai?
+Answer: submit se pehle previous selection capture hoti hai; API reject par wahi restore hoti hai.
+
+Q57. History feedback aur local optimistic feedback precedence?
+Answer: UI helpers current/local override aur history map coordinate karte hain. Exact stale-response protection absent; tests needed.
+
+Q58. Modal sirf NOT_HELPFUL par kyun?
+Answer: Negative category reason collection product flow hai; HELPFUL low-friction one-click rehta hai.
+
+Q59. Accessibility checks?
+Answer: Button labels/selected state, modal role, focus trap, Escape, keyboard submit aur screen-reader announcement test hone chahiye. Full WCAG compliance evidence N/A.
+
+Q60. Frontend tests?
+Answer: Feedback-specific automated tests nahi mile. React unit/integration aur browser E2E add karna high priority hai.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q61. Feedback feature real-time broadcast karta hai?
+Answer: N/A. Feedback REST write hai; other tabs ko WebSocket push evidence nahi.
+
+Q62. Streaming ke saath relation?
+Answer: generationComplete false feedback reject karta hai. Stream completion persistence is feature ka upstream invariant hai.
+
+Q63. Multi-tab update conflict?
+Answer: Last committed write wins; tabs automatically sync nahi. Version column/updatedAt conditional update or cross-tab event improvement hai.
+
+Q64. DB constraint enough?
+Answer: Duplicate row invariant ke liye haan; user-friendly concurrent semantics ke liye nahi. Atomic upsert/error translation chahiye.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q65. History N+1 avoid kaise hota hai?
+Answer: withFeedback message IDs batch query karta hai, then in-memory map.
+
+Q66. Analytics scalability?
+Answer: Two count queries simple hain, high volume par indexes/pre-aggregates useful. Current data size evidence N/A.
+
+Q67. Optimistic UI performance benefit?
+Answer: Network latency perceived interaction ko block nahi karti. Correct rollback cost accept ki jati hai.
+
+Q68. Potential hot path?
+Answer: Large message-history ID list aur IN query. Pagination already upstream contract par depend hai; chunking query/list bounds test karne chahiye.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q69. Current test evidence?
+Answer: Main me feedback behavior tests nahi; branch-tip 4185ea6 bhi documented custom tests add nahi karta.
+
+Q70. Service unit tests?
+Answer: Owner success, other owner, missing message, incomplete message, HELPFUL reason clear, NOT_HELPFUL reason, existing update aur repository failure.
+
+Q71. DB integration tests?
+Answer: V7 unique/check/cascade, V8 nullable reason, concurrent insert race aur transaction rollback.
+
+Q72. Controller tests?
+Answer: Authentication, @Valid null type, malformed enum, status/body, effective path aur analytics authorization.
+
+Q73. Frontend tests?
+Answer: duplicate click, modal reason, optimistic success, rollback, out-of-order requests, history restoration aur keyboard accessibility.
+
+Q74. Contract test specially kya lock kare?
+Answer: Main versus 4185ea6 differences: main optional reason/no reason restore; tip strict reason/reason history. Accidental claim drift avoid hoga.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q75. Production-ready upsert design?
+Answer: PostgreSQL ON CONFLICT(message_id,user_id) DO UPDATE, domain-specific errors, request observability aur authorization tests.
+
+Q76. Analytics production design?
+Answer: Admin-only endpoint, corrected version path, indexed query or materialized aggregate, date/model filters, audit logging and privacy controls.
+
+Q77. Event-driven analytics kab?
+Answer: High write volume ya near-real-time dashboards par outbox/event pipeline. Current scale par transactional row + query simpler hai.
+
+Q78. Observability kya add karoge?
+Answer: Accepted/rejected counts by safe reason code, latency, constraint conflicts, rollback errors; user/message content logs avoid karunga.
+
+Q79. Data retention?
+Answer: Product/privacy policy driven TTL/anonymization/delete cascade. Current explicit retention policy evidence N/A.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q80. “Admin endpoint secure hai because URL me admin hai”?
+Answer: False. Authorization policy absent hai.
+
+Q81. “Unique constraint means concurrent requests both succeed”?
+Answer: False. Duplicate rows prevent hote hain; loser constraint error paa sakta hai.
+
+Q82. “Optimistic UI means server success assume karke error ignore”?
+Answer: False. Temporary state set hoti hai aur failure rollback hota hai.
+
+Q83. “4185ea6 current main me hai”?
+Answer: False. Branch contains check ke mutabik tip feature branch par hai, main me merged through 1c3e913.
+
+Q84. “Feedback reason DB enum hai”?
+Answer: False. V8 VARCHAR(30) hai without reason CHECK; Java enum parsing application boundary hai.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q85. Feedback history kis existing feature par depend karti hai?
+Answer: User chat history/session ownership pipeline par. withFeedback existing message DTO flow enrich karta hai.
+
+Q86. Streaming branch se dependency?
+Answer: generationComplete state streaming lifecycle se aata hai; feedback partial output par blocked hai.
+
+Q87. Search result me feedback restore hota hai?
+Answer: SearchResult contract aur chat-history DTO alag hain; search result directly feedback fields carry karta hai aisa evidence N/A.
+
+Q88. Pinned chats se interaction?
+Answer: N/A at data model level. Pin session metadata hai, feedback message relation; shared UI orchestration regression testing relevant hai.
+
+Q89. Document-chat answer par feedback?
+Answer: RAG answer bhi persisted completed assistant Message hai to same generic feedback path apply hota hai; feedback schema document/model provenance store nahi karta.
+
+Q90. Tip merge karte waqt risks?
+Answer: DTO shape, enum error mapping, strict reason backward compatibility, frontend history mapper aur Postman contract. Main behavior tests pehle add karne chahiye.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q91. One-line architecture?
+Answer: React optimistic feedback UI → authenticated PUT → transactional owner-checked upsert → PostgreSQL composite uniqueness → history DTO enrichment.
+
+Q92. Main endpoint?
+Answer: PUT /api/v1/chat/messages/{id}/feedback.
+
+Q93. Analytics effective endpoint?
+Answer: /api/v1/api/v1/admin/feedback/stats; double prefix is a defect.
+
+Q94. DB migrations?
+Answer: V7 table/type check/composite unique/cascades; V8 nullable reason.
+
+Q95. Biggest security gap?
+Answer: Analytics endpoint lacks admin RBAC.
+
+Q96. Biggest concurrency gap?
+Answer: Read-then-insert race; unique constraint may reject one request instead of atomic upsert.
+
+Q97. Biggest test gap?
+Answer: No feedback-specific automated tests on main.
+
+Q98. Main vs tip?
+Answer: Main through 1c3e913; 4185ea6 strict validation/reason restoration is unmerged tip.
+
+Q99. Current guarantee?
+Answer: Owned completed message, one row per message+user, optimistic rollback.
+
+Q100. Potential improvement?
+Answer: Atomic upsert, precise status codes, admin RBAC, corrected analytics path, comprehensive service/DB/UI tests.
+
+FACTUAL UNCERTAINTY
+===================
+1. Exact business motivation and expected analytics consumers are not documented; implementation-based explanation diya gaya.
+2. Runtime deployment proxy path could alter externally exposed URLs, but repository configuration se effective paths above derive hote hain.
+3. Load/volume, retention policy, SLA and browser matrix evidence N/A.
+4. Dedicated feedback tests absent; behavior source/migration/commit inspection par grounded hai.

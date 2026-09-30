@@ -1,0 +1,215 @@
+FEATURE: STREAM STOP FIX — INTERVIEW PREPARATION
+Evidence: owned commits b08d5b1 and 4fac2b3, corresponding documentation, and commit snapshots.
+
+PROJECT CONTEXT
+`b08d5b1` created the initial Spring Boot/React chatbot scaffold. `4fac2b3` hardened the real-time flow with typed NEW/EDIT payloads, correlated chunk/error/done events, in-place regeneration, and cancellable Reactor subscriptions. Client sends STOMP to `/app/chat` or `/app/chat/stop` and subscribes to `/user/queue/messages`. `ActiveStreamRegistry` is a process-local `ConcurrentHashMap`; this branch has no Redis coordination and no Flyway migration.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Streaming response aur normal request-response me difference?
+Answer: Normal response ek final body deta hai. Streaming me chunks asynchronously aate hain, isliye correlation, cancellation, partial UI, terminal event, aur race handling needed hoti hai.
+
+Q2. Reactive stream cancellation kaise kaam karti hai?
+Answer: Subscription ka `Disposable` handle retain karke `dispose()` call karne se upstream processing cancel ki ja sakti hai. Concurrent requests me handle ko correct stream identity ke saath store, replace, aur conditionally remove karna zaroori hai, warna stale cleanup nayi stream ko affect kar sakta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q3. `ChatStompPayload` me branch-specific fields kya hain?
+Answer: `type`, `clientStreamId`, `messageId`, `content`, `editTargetMessageId`, aur `priorMessages`. `NEW` aur `EDIT` enum types verified hain.
+
+Follow-up: Branch ne exact problem kya solve ki aur owned commits kaun se hain?
+Answer: Primitive streaming ko NEW/EDIT contracts, assistant bubble IDs, client stream IDs, typed downstream envelopes, aur cancellable `Disposable` flow me evolve kiya. Scaffold commit `b08d5b1` aur stream/edit fix `4fac2b3` branch evidence hain.
+
+Q4. `StreamDownstreamEvent` ka purpose?
+Answer: `chunk`, `error`, aur `done` event factories typed envelope banate hain, with `clientStreamId`, optional `assistantMessageId`, chunk, ya message.
+
+Follow-up: Do IDs kyun?
+Answer: `clientStreamId` request lifecycle correlate karta hai; `assistantMessageId` exact UI bubble target karta hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q5. Raw text chunks ke badle envelope kyun?
+Answer: Raw text se stale stream aur target bubble distinguish nahi hote. Envelope event type aur correlation metadata carry karta hai.
+
+Q6. `Disposable` registry kyun?
+Answer: Reactor subscription ko cancel karne ke liye active handle chahiye. Registry principal ke against current subscription retain karti hai.
+
+Follow-up: Database me active stream kyun nahi?
+Answer: `Disposable` JVM object hai, serializable distributed execution handle nahi. This branch deliberately memory-local hai; durable metadata alag concern hota.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q7. NEW message end-to-end trace karo.
+Answer: Frontend IDs banata hai → `/app/chat` par JSON publish → `handleChat` principal/payload/content/messageId validate karta hai → prompt compose hota hai → registry prior stream dispose karke subscribe karti hai → chunks `/user/queue/messages` par event envelopes me aate hain → completion `done` bhejti hai.
+
+Q8. STOP flow trace karo.
+Answer:
+1. Client `/app/chat/stop` publish karta hai.
+2. `handleStop` WebSocket session ka `Principal.getName()` leta hai.
+3. `ActiveStreamRegistry` isi name se stored entry remove karke `Disposable.dispose()` karti hai.
+4. Cancelled entry ka `clientStreamId` use karke `done` event bheja jata hai.
+
+Follow-up: STOP body important hai?
+Answer: Handler nullable string body ko ignore karta hai. Is historical snapshot me registry key authenticated user ID nahi thi: WebSocket handshake ne random UUID principal name assign kiya tha. Wahi connection-scoped UUID chat registration aur STOP lookup dono me use hua, isliye STOP active stream se correlate ho saka. JWT-authenticated STOMP principal later login work me aaya; random handshake UUID ko authenticated user identity kehna sahi nahi hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q9. `replaceAndStart` atomicity kaise improve karta hai?
+Answer: `ConcurrentHashMap.compute(principalName, ...)` ke critical section me existing subscription dispose aur new supplier subscribe/store hota hai.
+
+Follow-up: Purana `Disposable.Swap` issue kya tha?
+Answer: Commented evidence ke mutabik STOP swap update se pehle dispose kar sakta tha, jisse actual Ollama subscription uncancelled reh sakti thi.
+
+Q10. `removeIfMatches` kyun hai?
+Answer: Old stream ka `doFinally` replacement stream ko delete na kare. Removal tabhi hota hai jab stored server `streamId` same ho.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q11. Missing content par kya response?
+Answer: Controller correlated `error` with “Message must not be empty” aur phir `done` send karta hai.
+
+Q12. EDIT me target ID missing ho to?
+Answer: Missing `editTargetMessageId` ya assistant `messageId` par `error` then `done` event bheja jata hai.
+
+Follow-up: Missing `clientStreamId`?
+Answer: Server UUID generate karta hai aur warning log karta hai; client correlation weaker ho sakti hai because generated id client ko first event me hi pata chalegi.
+
+Q13. STOP jab active stream nahi hai?
+Answer: `cancel` empty Optional return karta hai; log hota hai aur downstream `done` nahi bheja jata.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q14. Ollama stream error kaise handle hota hai?
+Answer: `doOnError` log karta hai, error envelope bhejta hai, phir done envelope bhejta hai; `doFinally` matching registry entry cleanup karta hai.
+
+Follow-up: Error prefix chunk aaye to?
+Answer: `doOnNext` me `ERROR_PREFIX` se start hone wala chunk normal chunk ke badle error event banta hai.
+
+Q15. Principal null ho to?
+Answer: Chat aur stop handler warning log karke return karte hain. Is snapshot me handler khud user-visible error emit nahi karta.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q16. Private queue isolation kaise hoti hai?
+Answer: `convertAndSendToUser(userName, "/queue/messages", event)` use hota hai aur client `/user/queue/messages` subscribe karta hai.
+
+Follow-up: Kya is branch me STOMP JWT hardening complete thi?
+Answer: Nahi. Principal-aware flow scaffold me tha; Bearer JWT CONNECT interceptor later login branch `f015aab` own karti hai.
+
+Q17. STOP another user ki stream cancel kar sakta hai?
+Answer: Historical snapshot me registry key `principal.getName()` thi, aur handshake ne har WebSocket connection ko random UUID name diya tha. STOP body/client-supplied username use nahi karta tha, isliye lookup same connection principal ke active entry tak scoped tha. Lekin yeh authenticated account ownership nahi thi; user-scoped JWT/STOMP identity later login branch me aayi.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q18. Is branch ne kaunsa data model introduce kiya?
+Answer: Initial `User`, `ChatSession`, aur `Message` JPA entities/repositories scaffold me aaye.
+
+Follow-up: Flyway migration thi?
+Answer: Nahi. Important limitation: schema model pre-Flyway tha; migration ownership later production-hardening branches ka hai.
+
+Q19. Kya WebSocket stream result 4fac2b3 snapshot me persist hota hai?
+Answer: Verified `ChatWebSocketController` sirf streaming service, messaging template, aur registry depend karta hai; WS result persistence call nahi hai. REST chat scaffold separately messages persist karta tha.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q20. Exact real-time destinations kya hain?
+Answer: Application destinations `/app/chat` and `/app/chat/stop`; user destination `/user/queue/messages`; broker WebSocket URL snapshot me `ws://localhost:9999/api/v1/ws-chat`.
+
+Q21. Kya STOMP events ke HTTP status codes hote hain?
+Answer: Nahi. STOMP application outcome typed message events se communicate hota hai. HTTP status REST controller paths ke liye relevant hai.
+
+Follow-up: Invalid payload framework 400 dega?
+Answer: Is handler ke manual guards event/return behavior use karte hain; STOMP frame ko REST 400 bolna technically wrong hoga.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q22. In-place edit ka UI flow kya hai?
+Answer: `ChatWindow.commitEdit` trimmed draft parent `onEditSave` ko deta hai. Parent existing paired assistant bubble clear karke same id par EDIT stream regenerate karta hai.
+
+Follow-up: Edit streaming ke time?
+Answer: Edit controls disabled hain aur parent guard bhi active stream me edit reject karta hai.
+
+Q23. Stale chunks se UI ko kaise bachaya?
+Answer: Frontend active `clientStreamId` aur assistant message ID compare karke exact stream/bubble update karta hai; arbitrary latest bubble append nahi karta.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q24. Main STOP race kya hai?
+Answer: STOP subscription handle register hone se pehle aa sakta tha. `replaceAndStart` subscription creation and map replacement same compute section me karta hai.
+
+Q25. Completion aur STOP overlap karein to?
+Answer: Dispose cancellation trigger kar sakta hai, while terminal callbacks race kar sakte hain. Map matching stale cleanup se protect hai, but exactly-one terminal event ka explicit state machine/test evidence nahi hai.
+
+Follow-up: Multi-instance deployment?
+Answer: Request node A par aur STOP node B par route hua to B ke local map me handle nahi milega. Sticky sessions ya distributed ownership/routing design needed hai.
+
+Q26. Ek user new request bheje while old streaming?
+Answer: Same principal key par old disposable dispose hota hai aur new active stream replace hoti hai.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q27. Prompt performance concern?
+Answer: `ChatPromptComposer.compose` supplied prior messages ko string me combine karta hai. Branch bounded history/token-budget enforcement show nahi karti.
+
+Follow-up: Backpressure?
+Answer: Reactor Flux use hota hai, but UI/broker pacing, bounded buffers, ya explicit backpressure strategy ka evidence is branch me nahi hai.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q28. Actual test evidence kya hai?
+Answer: Scaffold me sirf Spring context-load `ChatbotApplicationTests` tha. NEW/EDIT/STOP behavior, race, controller, ya frontend tests add nahi hue.
+
+Q29. High-value test suite kya hogi?
+Answer: Registry race tests, replacement disposal, no-active STOP, invalid NEW/EDIT, error→done ordering, stale cleanup, private destination, frontend stale-chunk rejection, aur Ollama cancellation integration.
+
+Follow-up: Exactly-one done kaise assert karoge?
+Answer: Concurrent STOP/completion orchestration with controlled Flux and captured messaging events; per `clientStreamId` terminal-event count assert karunga.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q30. Production design me kya change karoge?
+Answer: Explicit stream state machine, bounded prompt, broker observability, timeout, distributed stream ownership, sticky routing or command routing, and contract/race tests.
+
+Follow-up: Redis add karna enough hai?
+Answer: Nahi. Redis me metadata rakhne se remote JVM ka `Disposable` cancel nahi hota; owner-node command delivery bhi chahiye.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+OWNERSHIP / EVIDENCE SUBSECTION
+
+Q31. Branch ko “stream stop only” kehna accurate hai?
+Answer: Incomplete hai. `b08d5b1` full scaffold own karta hai; `4fac2b3` typed streaming, edit, stop race fix, prompt composition, and UI regeneration add karta hai.
+
+Q32. Kya later persistence/reconnect behavior claim karoge?
+Answer: Nahi. Current-source behavior inherited evolution ho sakta hai; interview answer me owned snapshot aur later branch clearly separate karunga.
+
+TRICK / CROSS SUBSECTION
+
+Q33. `done` ka matlab response DB me saved hai?
+Answer: Is branch snapshot me nahi. `done` transport stream termination signal hai; WS persistence call absent hai.
+
+Q34. `ConcurrentHashMap` hone se distributed safe hai?
+Answer: Nahi. Yeh sirf same JVM threads ke liye concurrent hai.
+
+Follow-up: `compute` every race solve karta hai?
+Answer: Map replacement race address karta hai; network reordering, duplicate frames, multi-node routing, aur terminal-event race automatically solve nahi hote.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q35. Login branch ne kya add kiya?
+Answer: `f015aab` STOMP CONNECT Bearer JWT interceptor add karti hai; ise stream-stop ownership nahi bolenge.
+
+Q36. User-history/reconnect branches ka evolution kya tha?
+Answer: Later branches session IDs, message persistence, draft chats, generation state, and reconnect recovery evolve karti hain. Yeh branch ka typed correlation contract unka foundation hai, final behavior nahi.
+
+Follow-up: Redis branch relation?
+Answer: Later Redis work metadata/state coordination add karta hai; original `ActiveStreamRegistry` in-memory process-local hi tha.
+
+SECTION 18 — RAPID REVISION
+- Owners: `b08d5b1`, `4fac2b3`.
+- STOMP: `/app/chat`, `/app/chat/stop`, `/user/queue/messages`.
+- Contracts: `ChatStompPayload`; `StreamDownstreamEvent` chunk/error/done.
+- Cancellation: principal-keyed process-local `ActiveStreamRegistry`, `Disposable.dispose()`.
+- Race guards: map `compute`, server `streamId`, `removeIfMatches`.
+- No Flyway; context-load test only; WS result persistence absent in verified 4fac2b3 controller.
+- Biggest limitation: multi-instance cancellation and exactly-one terminal semantics.

@@ -1,0 +1,235 @@
+INTERVIEW PREPARATION
+Branch: fix/reconnect-contract-restore
+
+PROJECT CONTEXT
+Despite branch name, commit `9434f50` implements configurable Bucket4j IP rate limiting—not reconnect restoration. Login is 5/min/IP, REST chat 60/min/IP, filter runs before JWT, maps are per JVM, first X-Forwarded-For is trusted, and STOMP is not covered.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Rate limiting ka objective kya hai?
+
+Answer:
+Request abuse, brute force aur resource exhaustion ko bounded rate/burst se control karna; authorization ka replacement nahi.
+
+Q2. Token bucket algorithm kaise kaam karta hai?
+
+Answer:
+Bucket capacity tak tokens hold karta hai; request token consume karti hai; refill policy time ke saath tokens add karti hai.
+
+Follow-up Q2.1: Greedy refill ka behavior kya hai?
+
+Answer:
+Tokens elapsed time ke proportion me continuously available hote hain, interval boundary par ek saath fixed refill nahi.
+
+Q3. Capacity aur refill rate me difference?
+
+Answer:
+Capacity maximum burst define karti hai; refill tokens/duration sustained rate define karta hai.
+
+Q4. Servlet filter rate limiting ke liye useful kyun hai?
+
+Answer:
+Controller se pehle cross-cutting HTTP decision centrally apply hota hai.
+
+Q5. Reverse proxy ke behind client IP ka challenge kya hai?
+
+Answer:
+Socket remote address proxy ho sakta hai; forwarded header useful hai but only trusted proxy chain se safe hai.
+
+Follow-up Q5.1: First XFF value blindly lena risky kyun hai?
+
+Answer:
+Direct/untrusted client header prepend karke fake identity de sakta hai. Trusted edge ko header sanitize/set karna chahiye.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q6. Exact configured limits kya hain?
+
+Answer:
+Prod config: login capacity/refill 5 per 60s; chat capacity/refill 60 per 60s, greedy refill.
+
+Q7. Kaunse methods/routes classify hote hain?
+
+Answer:
+POST login suffix match; non-OPTIONS path starting chat base path. Other requests no bucket ke saath continue.
+
+Q8. Exhaustion response kya hai?
+
+Answer:
+HTTP 429 JSON `ErrorResponse` with message, status and timestamp; filter chain continue nahi hoti.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q9. Rate limiter JWT filter se pehle kyun rakha?
+
+Answer:
+Login unauthenticated hai and abuse ko auth processing/controller se pehle reject karna useful hai. Trade-off: identity IP-based aur shared-NAT users impact ho sakte hain.
+
+Q10. Per-IP approach kyun imperfect hai?
+
+Answer:
+NAT many users combine karta hai; attackers IP rotate/spoof forwarded header kar sakte hain; authenticated chat ke liye user+IP policy stronger ho sakti hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q11. Request flow trace karo.
+
+Answer:
+OncePerRequestFilter path/method/IP resolve karta hai → map se bucket compute/get → `tryConsume(1)` → allow chain or serialize 429.
+
+Q12. Bucket kaise construct hota hai?
+
+Answer:
+`Bandwidth.classic(capacity, Refill.greedy(tokens, Duration))` then Bucket builder adds limit.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q13. OPTIONS chat request bypass kyun hai?
+
+Answer:
+CORS preflight ko business request quota consume/block nahi karna chahiye.
+
+Q14. Do alag maps kyun hain?
+
+Answer:
+Login aur chat independent policies/buckets maintain karte hain; same IP ka login usage chat allowance consume nahi karta.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q15. Spoofed `X-Forwarded-For` se kya ho sakta hai?
+
+Answer:
+Attacker fresh fake IP values se limit evade aur unbounded keys create kar sakta hai; edge must strip/set headers and app trust only known proxies.
+
+Q16. Many unique IPs ka memory effect?
+
+Answer:
+`ConcurrentHashMap` entries have no eviction in code, so cardinality process lifetime me grow kar sakti hai.
+
+Q17. Shared office/NAT traffic ka edge case?
+
+Answer:
+Many legitimate users same public IP bucket share karenge and false throttling possible hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q18. 429 response me kya improve karoge?
+
+Answer:
+`Retry-After` and standard rate-limit headers, stable error code, request correlation; raw IP logs/labels avoid.
+
+Q19. JSON serialization fail ho to?
+
+Answer:
+`ObjectMapper.writeValue` IOException propagate kar sakta hai; filter-specific test and fallback minimal response useful hai.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q20. Forwarded IP securely resolve kaise karoge?
+
+Answer:
+Only trusted proxy hops accept, framework forward-header strategy/allowlist use, direct client-supplied XFF discard, canonical IP parse.
+
+Q21. Rate limiting brute force fully stop karta hai?
+
+Answer:
+Nahi. Distributed attackers, credential stuffing and IP rotation remain; account-level controls, MFA/lockout monitoring and detection complement karte hain.
+
+SECTION 9 — DATABASE QUESTIONS
+
+N/A — login/chat buckets in-memory maps hain; no DB table or migration.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q22. HTTP semantics me 429 kyun correct hai?
+
+Answer:
+Server policy ke according too many requests; 401/403 auth decisions se distinct.
+
+Q23. Kya `/api/v1/chat/**` STOMP messages include karta hai?
+
+Answer:
+Nahi. Servlet HTTP path classification STOMP frames/destinations inspect nahi karti.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+N/A — branch ne frontend source ya explicit 429 UX change nahi ki.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q24. Concurrent requests same local bucket safely consume karte hain?
+
+Answer:
+Bucket4j bucket primitive concurrent consumption handle karta hai and map is ConcurrentHashMap; this is one JVM only.
+
+Q25. Multi-instance deployment me effective limit kya hoga?
+
+Answer:
+Each JVM independent bucket rakhta hai, so traffic distribution aggregate allowance multiply/bypass kar sakti hai.
+
+Q26. Distributed design options?
+
+Answer:
+Gateway-level limiter or Redis-backed Bucket4j/state with atomic operations and TTL; failure policy explicitly choose.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q27. Hot-path cost aur memory risk kya hai?
+
+Answer:
+Every selected request path/IP lookup plus token consume; major risk unbounded map cardinality, not algorithmic CPU.
+
+Q28. Metrics kaise design karoge?
+
+Answer:
+Allowed/rejected counts by route class, saturation and map size; IP ko metric label na banao due cardinality/privacy.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q29. Minimum filter test matrix?
+
+Answer:
+Threshold boundary, greedy refill with controllable clock, login/chat separation, OPTIONS bypass, unmatched route, XFF parsing, 429 JSON and filter order.
+
+Q30. Distributed limitation ka test kaise?
+
+Answer:
+Two application instances same synthetic IP ke saath show independent allowance; then shared-store design me aggregate assertion.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q31. Production hardening sequence?
+
+Answer:
+Trusted edge/header config → bounded/distributed buckets → safe failure mode → headers/metrics → staged thresholds based on traffic.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q32. Branch name dekhkar reconnect behavior claim karna kyun wrong hai?
+
+Answer:
+`9434f50` diff is Bucket4j filter/properties/security/config. No reconnect or WebSocket contract implementation.
+
+Q33. Thread-safe ka matlab distributed-safe hai?
+
+Answer:
+Nahi. ConcurrentHashMap/Bucket local threads coordinate karte hain, multiple processes nahi.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q34. Project me Redis hone se limiter Redis-backed ho jata hai?
+
+Answer:
+Nahi. This implementation explicitly local maps use karta hai; Redis stream features separate branch concern hain.
+
+Q35. Later reconnect fixes ko yahan attribute karoge?
+
+Answer:
+Nahi. Branch ownership commit diff se; STOMP/reconnect lifecycle separate changes hain.
+
+SECTION 18 — RAPID REVISION
+
+Q36. Rapid recall?
+
+Answer:
+Bucket4j, 5/min login, 60/min REST chat, greedy refill, before JWT, 429 JSON, per-JVM maps, XFF risk, no STOMP/reconnect.

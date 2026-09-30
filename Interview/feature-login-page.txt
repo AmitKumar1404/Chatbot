@@ -1,0 +1,254 @@
+FEATURE: LOGIN PAGE AND AUTHENTICATION — INTERVIEW PREPARATION
+Evidence: owned commits f015aab, f777e27, 0e6f183, 645a74d; corresponding docs and commit snapshots. Refresh-token code visible at the later branch tip was inherited through merged main, not wholly created by the original login commits.
+
+PROJECT CONTEXT
+The branch evolved from routed login/register UI and JWT-secured REST/STOMP access into profile/logout UX and forgot/reset-password email flow. `f015aab` added `AuthContext`, auth pages, `/auth/me`, and `StompJwtChannelInterceptor`; `f777e27` moved profile/logout into the sidebar; `0e6f183` added email/reset services plus Flyway V4/V5; `645a74d` switched the context test to the local profile in CI. Original `f015aab` used `localStorage`; tab-specific `sessionStorage` came later from the separate multi-user-login lineage. Refresh rotation was also inherited/current integration, not original login-page ownership.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Authentication aur authorization me difference?
+Answer: Authentication identity verify karta hai; authorization decide karta hai authenticated user kaunse resource/action access kar sakta hai.
+
+Q2. JWT ka role kya hai?
+Answer: Server-signed token username/expiry claims carry karta hai. REST filter aur STOMP CONNECT interceptor signature/expiry validate karke principal establish karte hain.
+
+Follow-up: Password JWT me hota hai?
+Answer: Nahi. Credentials login par verify hote hain; token me password store karna unsafe aur unnecessary hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q3. `f015aab` ne frontend me kya add kiya?
+Answer: `AuthContext`, `LoginPage`, `RegisterPage`, route protection/bootstrap, `ChatApp` separation, API URL helper, aur token-aware WebSocket connect.
+
+Q4. Backend me main addition kya thi?
+Answer: `StompJwtChannelInterceptor`, inbound-channel registration, `/auth/me`, security path updates, aur JWT-aware STOMP connection.
+
+Follow-up: Profile change?
+Answer: `f777e27` avatar/profile dropdown aur logout UX sidebar me move karta hai.
+
+Q5. Password reset ownership?
+Answer: `0e6f183` forgot/reset DTOs, controller endpoints, `PasswordResetServiceImpl`, `MailServiceImpl`, token entity/repository, email field, V4/V5 migrations, and pages own karta hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q6. REST JWT filter ke alawa STOMP interceptor kyun?
+Answer: WebSocket HTTP handshake permit hone ke baad STOMP CONNECT/SEND alag message channel par chalte hain. Native Authorization header ko channel interceptor me validate karna padta hai.
+
+Follow-up: Handshake permit-all unsafe hai?
+Answer: Socket transport open ho sakta hai, but CONNECT invalid token par reject hota hai and protected `/app/` SEND unauthenticated principal ke bina reject hota hai. Resource/connection abuse ke liye handshake-level controls still improvement hain.
+
+Q7. Reset token DB me hash kyun?
+Answer: DB leak hone par raw bearer reset link directly usable na ho. Incoming raw token SHA-256 hash karke lookup hota hai.
+
+Q8. Forgot response generic kyun?
+Answer: Known aur unknown username ko same response dene se account enumeration reduce hota hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q9. Login flow trace karo.
+Answer: `LoginPage` → `AuthContext.login` → POST `/api/v1/auth/login` → `AuthenticationManager.authenticate` → access JWT generation → 200 `AuthResponse` → browser token/state update → protected app.
+
+Follow-up: Original storage?
+Answer: Verified `f015aab` snapshot `localStorage` use karta hai. `sessionStorage` later `ba1f78a` separate fix se aaya; branch-tip/current integration ko original ownership nahi bolenge.
+
+Q10. App bootstrap kaise hota hai?
+Answer: Stored token read hota hai, Bearer header ke saath GET `/api/v1/auth/me` call hota hai; success username restore karta hai, failure token/auth state clear karta hai; cancellation flag stale setState avoid karta hai.
+
+Q11. STOMP authentication flow?
+Answer: CONNECT native Authorization header → `extractBearer` → `JwtUtil.validateToken` → username extraction → `UserDetailsService` → authenticated `UsernamePasswordAuthenticationToken` → `accessor.setUser`.
+
+Follow-up: SEND/SUBSCRIBE guard?
+Answer: Interceptor `/app/` destination wale SEND/SUBSCRIBE ke liye user require karta hai. Exact method `requiresUser`.
+
+Q12. Forgot-password flow?
+Answer: POST forgot endpoint username leta hai; known user with email ke active reset tokens revoke hote hain; UUID raw token generate hota hai; hash DB me save; raw token frontend reset URL me email hota hai; response generic 200 hai.
+
+Q13. Reset-password flow?
+Answer: Request token hash lookup → non-revoked token check → expiry check → BCrypt password update → reset token revoke → active refresh tokens revoke → 200 success.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q14. Three-argument authentication token constructor kyun?
+Answer: Spring Security 6 me authorities wala constructor authenticated token banata hai; manual `setAuthenticated(true)` exception de sakta hai, jaisa source comment explain karta hai.
+
+Q15. `parseJsonSafe` kyun?
+Answer: Empty ya malformed response body JSON parse crash na kare. UI fallback error message use kar sakti hai.
+
+Follow-up: Network error bootstrap par?
+Answer: Original effect catch me stored token remove aur auth clear karta hai; transient outage logout-like behavior produce kar sakti hai.
+
+Q16. Logout server call karta hai?
+Answer: Original `AuthContext.logout` local stored access token aur React state clear karta hai. Server-side access-token blacklist original flow me evidenced nahi hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q17. Invalid/expired JWT ke saath STOMP CONNECT?
+Answer: `MessageDeliveryException("Invalid or expired token")` throw hoti hai; principal establish nahi hota.
+
+Q18. Forgot request known user but email null?
+Answer: Mail/token creation skip hoti hai, lekin same generic success response return hota hai.
+
+Q19. Reset token expired?
+Answer: Entity revoked set/save hoti hai, phir invalid-or-expired runtime exception throw hoti hai.
+
+Follow-up: Transaction effect?
+Answer: Method `@Transactional` hai. Runtime exception rollback ki wajah se expiry-time revoke save durable na bhi ho sakta hai; code intent aur actual transaction semantics me yeh subtle caveat test karna chahiye.
+
+Q20. Same reset token se concurrent requests?
+Answer: Lookup-then-update path me explicit pessimistic lock/version evidence nahi hai; strict one-time serialization guaranteed claim nahi karunga.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q21. Bad credentials ka expected status?
+Answer: Global exception mapping ke evidence ke mutabik generic invalid-credentials response ke saath 401.
+
+Q22. DTO validation failure?
+Answer: `@Valid` applies: username/password required; reset token nonblank aur new password minimum length 6; invalid request framework/global handling se 400 category me jati hai.
+
+Follow-up: Invalid reset domain error?
+Answer: Current documented handler RuntimeException ko 400 map karta hai, dedicated 401/404 nahi.
+
+Q23. SMTP failure par kya hoga?
+Answer: `MailServiceImpl.sendPasswordResetEmail()` `mailSender.send()` exception catch karke error log karta hai aur rethrow nahi karta. Isliye `requestReset()` generic success return kar sakta hai aur reset-token transaction commit ho sakti hai even though email deliver nahi hui. Retry/outbox evidence nahi hai.
+
+Q24. DB commit mail send ke baad fail ho?
+Answer: Email external side effect transaction commit se pehle execute hota hai. Agar mail send successful ho aur later DB commit fail ho, user ko unusable token link mil sakta hai. Transactional outbox DB state aur email dispatch ko reliably coordinate kar sakta hai.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q25. Password storage kaise secure hai?
+Answer: Registration/reset path `PasswordEncoder`/BCrypt use karta hai; plaintext password persist karne ka evidence nahi hai.
+
+Q26. Reset flow enumeration kaise reduce karta hai?
+Answer: Unknown username, missing email, aur valid account ke liye same generic message/status return hota hai.
+
+Follow-up: Timing leak possible?
+Answer: Known-user path DB writes aur SMTP karta hai, so response timing differ kar sakti hai. Async mail/constant-ish response path improvement hai.
+
+Q27. Browser token storage risk?
+Answer: `localStorage`/`sessionStorage` JavaScript-readable hain, so XSS token theft risk hai. HttpOnly Secure SameSite cookie alternative evaluate kar sakte hain, CSRF controls ke saath.
+
+Q28. Reset link security?
+Answer: Raw token URL me hota hai; logs, browser history, referrer leakage minimize karni chahiye. DB only hash rakhta hai and token expires/revokes.
+
+Q29. Secret handling?
+Answer: JWT/SMTP secrets docs me expose nahi karne. Environment/secret manager use hona chahiye; no secret values are included here.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q30. V4 migration kya karti hai?
+Answer: `users.email VARCHAR(255)` nullable add karti hai aur non-null values par PostgreSQL partial unique index banati hai.
+
+Follow-up: Nullable kyun?
+Answer: Existing users without email migrate ho saken; multiple NULL allowed, duplicate real emails reject hote hain.
+
+Q31. V5 schema?
+Answer: `password_reset_tokens` with BIGSERIAL id, user FK `ON DELETE CASCADE`, unique 64-char `token_hash`, `TIMESTAMPTZ` expiry/created timestamps, revoked flag, and lookup indexes.
+
+Q32. Refresh revocation repository yahan kyun visible hai?
+Answer: Reset success existing refresh sessions invalidate karta hai. Refresh-token subsystem branch tip me inherited integration hai; original `f015aab/f777e27` ownership nahi.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q33. Exact auth endpoints/statuses?
+Answer: POST `/api/v1/auth/register` → 201; POST login → 200; GET me → 200 or 401; POST forgot-password → generic 200; POST reset-password → 200 on success.
+
+Follow-up: Refresh endpoint?
+Answer: Later snapshot me POST `/api/v1/auth/refresh` exists, but refresh rotation separate refresh-token branch se inherited hai; login feature ke original commits ko credit nahi dena.
+
+Q34. DTOs ka role?
+Answer: `LoginRequest`, `RegisterRequest`, `ForgotPasswordRequest`, `ResetPasswordRequest` inputs define/validate karte hain; `AuthResponse` and `MessageResponse` outputs isolate transport contracts.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q35. `AuthContext` centralize kyun?
+Answer: Token, username, bootstrapping, login/register/logout APIs aur route decisions ek provider se consistent milte hain.
+
+Q36. Route bootstrapping spinner/guard kyun?
+Answer: Stored token validate hone se pehle login page flash ya protected app unauthorized render avoid hota hai.
+
+Follow-up: Register success auto-login?
+Answer: Original `register` method POST karta hai but returned token store nahi karta; behavior ko login ke equal assume nahi karenge.
+
+Q37. Profile dropdown ka security role?
+Answer: Mostly UX. Logout trigger token/state clear karta hai; avatar/dropdown khud authorization control nahi hai.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q38. STOMP multiple frames me principal kaise survive karta hai?
+Answer: CONNECT par accessor user set hota hai; subsequent session frames established user reuse karte hain.
+
+Q39. Reset race ka mitigation?
+Answer: Current revoked check and transaction intent provide karte hain, but explicit row lock/version absent hai. Atomic update or pessimistic lock production hardening hoga.
+
+Follow-up: Duplicate registration race?
+Answer: Service pre-check alone sufficient nahi; username/email DB uniqueness final invariant honi chahiye.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q40. Auth performance bottlenecks?
+Answer: BCrypt intentionally CPU-expensive hai, `/me` user/token processing, SMTP latency forgot response ko block kar sakti hai, aur abuse login endpoint load badha sakta hai.
+
+Follow-up: Improvement?
+Answer: Rate limiting, async/outbox mail, tuned BCrypt cost, indexes, metrics, aur bounded connection/auth failures.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q41. Actual test evidence?
+Answer: `645a74d` existing Spring context-load test ko `local` profile par run karata hai. Auth controller/service/STOMP/reset behavior tests add hone ka evidence nahi hai.
+
+Q42. Critical tests?
+Answer: Login 200/401, register 201/duplicates, `/me`, JWT expiry/signature, STOMP missing/invalid/valid CONNECT, generic forgot response, reset expiry/replay, password encoding, refresh revocation, mail failure, and V4/V5 migration tests.
+
+Follow-up: Frontend tests?
+Answer: Bootstrap valid/invalid/network-error, login response parsing, protected routing, logout, forgot/reset validation, and storage behavior test karunga.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q43. Production-ready auth architecture?
+Answer: Short-lived access token, secure refresh rotation, HttpOnly cookie evaluation, rate limits, restricted origins, key rotation, audit logs, mail outbox, reset replay lock, and end-to-end tests.
+
+Q44. Observability me kya log nahi karna?
+Answer: Passwords, access/refresh tokens, reset raw token, Authorization headers, aur sensitive email link. Outcome/status and correlation metadata log karenge.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+OWNERSHIP / EVIDENCE SUBSECTION
+
+Q45. Storage lineage accurately kaise explain karoge?
+Answer: Login branch initially `localStorage` thi. Later multi-user-login fix `sessionStorage` laya. Current integration ko dekhkar original commit par sessionStorage claim nahi karunga.
+
+Q46. Refresh lineage kaise explain karoge?
+Answer: `0e6f183` branch-tip code merged refresh services use karta hai, especially reset-time revocation. Core refresh rotation separate feature commit lineage se inherited hai.
+
+TRICK / CROSS SUBSECTION
+
+Q47. JWT encrypted hota hai?
+Answer: Typical signed JWT confidential nahi hota; payload decode ho sakta hai. Security signature, expiry, transport TLS, and safe claims par depend karti hai.
+
+Q48. Generic forgot response account enumeration completely stop karti hai?
+Answer: Nahi. Timing, rate behavior, email side channels, or registration responses leak kar sakte hain. It reduces one direct signal.
+
+Q49. `@Transactional` email ko rollback kar dega?
+Answer: Nahi. DB state rollback ho sakti hai; already-sent SMTP message external side effect hai.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q50. Stream-stop branch se relation?
+Answer: It had principal-aware STOMP handlers; login branch CONNECT JWT validation add karke identity boundary harden karti hai.
+
+Q51. Refresh-token and multi-user branches se relation?
+Answer: Refresh rotation and tab-scoped sessionStorage later/separate ownership hain, though merged code login branch reset flow ke saath integrate hota hai.
+
+Follow-up: Production-hardening branch relation?
+Answer: Initial auth UI/JWT ko later environment secrets, rate limiting, CI, and broader production controls strengthen karte hain; ownership separate rakhenge.
+
+SECTION 18 — RAPID REVISION
+- Owners: `f015aab`, `f777e27`, `0e6f183`, `645a74d`.
+- REST: register 201; login/me/forgot/reset success 200; unauthenticated me 401.
+- STOMP: Bearer token validated in `StompJwtChannelInterceptor.preSend`.
+- Reset: raw UUID emailed, SHA-256 hash stored, expiry/revocation checked, password BCrypt, refresh sessions revoked.
+- DB: V4 email + partial unique index; V5 reset-token table.
+- Original storage: localStorage; sessionStorage later separate fix.
+- Refresh rotation: inherited separate branch, not original login ownership.
+- Tests: local-profile context load only; no verified auth behavior suite.

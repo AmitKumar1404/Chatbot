@@ -1,0 +1,217 @@
+FEATURE/RECONNECT-RECOVERY — INTERVIEW PREPARATION
+Evidence: owned commits 339d9d7 and 492d39c; corresponding docs, diffs, and current source at a62003a.
+Scope note: Answers verified behavior aur clearly-labelled improvements ko separate rakhte hain. Owned commits me automated tests add nahi hue.
+
+PROJECT CONTEXT
+===============
+Q1. Feature ka one-line summary kya hai?
+Answer:
+Network ya backend interruption ke baad running AI response ko blindly lost maan-ne ke bajay active-stream metadata, periodically persisted partial text, aur stale-connection guards se UI ko reconcile karna. Branch user-chat-history ke baad aayi; actual ownership 339d9d7 aur 492d39c ka hai.
+
+Q2. Main building blocks kya the?
+Answer:
+Protected GET /api/v1/chat/stream/active, ActiveStreamStatusDto, ActiveStreamRegistry, incomplete Message row, lagbhag 400 ms par partial aiResponse writes, frontend recovery polling/AbortController, aur WebSocket connection IDs. DTO ka exact field assistantMessageId hai.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q3. Reconnect aur resume me difference?
+Answer:
+Reconnect transport ko dobara establish karta hai. Resume/recovery application state ko reconcile karta hai: kaunsa stream active hai, kaunsi session/message belong karti hai, aur DB me kitna partial output durable hai.
+
+Q4. 200 aur 204 active-stream response ka meaning?
+Answer:
+Authenticated principal ka stream active ho to 200 with clientStreamId, sessionId, assistantMessageId. Active stream na ho to 204. Missing/invalid principal path 401 ho sakta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q5. Is branch ne database behavior kaise badla?
+Answer:
+Generation start se pehle assistant placeholder/incomplete message generationComplete=false ke saath create ya reset hota hai. Streaming ke dauran accumulated aiResponse roughly 400 ms interval par short transaction me update hota hai; completion par final state persist hoti hai.
+
+Q6. useSidebarState.js ka status kya hai?
+Answer:
+492d39c ne hook add kiya, lekin repository usage search me live import/caller nahi mila. Isliye interview me ise runtime reconnect/sidebar implementation nahi bolunga; later responsive sidebar ChatApp ke inline state se implement hui.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q7. Har token DB me kyun nahi write kiya?
+Answer:
+Per-token writes DB load, transaction overhead aur lock churn badhate. Approx 400 ms throttle durability aur write amplification ke beech practical compromise hai. Exact production optimum benchmark se prove nahi hua.
+
+Q8. Sirf frontend buffer par depend kyun nahi kiya?
+Answer:
+Tab crash, refresh ya backend restart me memory buffer lose ho sakta hai. Partial DB row durable recovery point deti hai. Improvement ke liye write cadence configurable, measured, aur backpressure-aware honi chahiye.
+
+Q9. Endpoint missed chunks replay kyun nahi karta?
+Answer:
+Endpoint metadata probe hai, event log nahi. Client DB messages reload karke reconcile karta hai. True replay ke liye ordered durable event stream, offsets aur retention chahiye, jo owned commits me nahi hai.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q10. End-to-end recovery flow explain karo.
+Answer:
+Stream start par placeholder persist hota hai aur registry principal ke against IDs register karti hai. Chunks UI ko jaate hain aur accumulated text periodic DB writes me save hota hai. Disconnect par client old requests abort karta hai, socket reconnect karta hai, active endpoint aur session messages fetch karta hai, IDs compare karta hai, active state me poll karta hai, aur stale callbacks ignore karta hai.
+
+Q11. beginStreamingTurn aur updatePartialAiResponse ki responsibility?
+Answer:
+beginStreamingTurn owner-scoped session/message validate karke incomplete row establish karta hai. updatePartialAiResponse same owner/session/assistant identity par incomplete message update karta hai. Short transactions long Ollama stream ko DB transaction ke andar hold nahi karte.
+
+Q12. connectionId guard kaise help karta hai?
+Answer:
+Har socket creation ko identity milti hai. Purane client ka delayed onConnect/onError/message callback current connection se match na kare to ignore hota hai, warna old callback new UI state overwrite kar sakta tha.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q13. Follow-up: assistantMessageId kyun important hai?
+Answer:
+Session me multiple assistant turns ho sakte hain. assistantMessageId exact persisted placeholder aur UI bubble correlate karta hai; sirf sessionId se wrong incomplete response merge hone ka risk hota.
+
+Follow-up Q13.1. clientStreamId aur assistantMessageId same hain?
+Answer:
+Nahi. clientStreamId request/stream correlation identity hai; assistantMessageId persisted assistant bubble identity hai. Dono ko interchangeable nahi maan-na chahiye.
+
+Q14. Follow-up: AbortController kya solve karta hai?
+Answer:
+Chat switch, logout ya newer recovery attempt par old active-status/message fetch cancel hota hai. Yeh server work rollback guarantee nahi karta, but stale response ko UI me apply hone se rokne me help karta hai.
+
+Follow-up Q14.1. Recovery polling kab stop hona chahiye?
+Answer:
+Completion/idle response, ownership mismatch, component cleanup, chat/user change, ya superseding recovery par. Bounded retry aur jitter production improvement hain; existing implementation ko infinite-safe claim nahi karunga.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q15. What if socket mid-chunk close ho?
+Answer:
+Last persisted partial text tak recovery possible hai; last 400 ms window ka output DB me na ho sakta hai. Active metadata aur IDs decide karte hain ki poll/reconcile karna hai ya incomplete state finalize/restart karni hai.
+
+Q16. What if STOP aur reconnect race karein?
+Answer:
+Delayed recovery response stopped stream ko active dikha sakta hai. Current IDs, current-stream checks, request abortion aur stale callback guards risk reduce karte hain. Stronger fix monotonic version/lease aur idempotent STOP hota.
+
+Q17. What if two browser tabs same user use karein?
+Answer:
+This branch ka backend key principal-centric tha; tab isolation later f3fb373 me sessionStorage ownership se stronger hua. Reconnect branch alone ko complete cross-tab isolation credit nahi dena chahiye.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q18. DB partial write fail ho to kya hota hai?
+Answer:
+Current code failure log/stream behavior ke bounded path par depend karta hai; transaction failed write rollback karti hai, external Ollama stream automatically rollback nahi hota. Production me metrics, retry policy, and final-write verification useful hain.
+
+Q19. Active endpoint unavailable ho to UX?
+Answer:
+Client ko disconnected/recovering state consistent rakhni chahiye aur stale local state ko success nahi dikhana chahiye. Existing behavior se beyond circuit breaker ya guaranteed retry claim nahi karunga.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q20. Active-stream endpoint secure kaise hai?
+Answer:
+JWT-protected REST boundary Authentication.getName() se current principal leta hai; caller arbitrary username pass nahi karta. Registry lookup principal-scoped hai, which reduces cross-user metadata leakage.
+
+Q21. Kya IDs authorization replace karte hain?
+Answer:
+Nahi. client-provided stream/message IDs untrusted correlation values hain. Service/repository owner checks authoritative boundary hain. Logs me token ya sensitive prompt/output dump nahi karna chahiye.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q22. Transaction strategy explain karo.
+Answer:
+Long-running model stream ek giant transaction me nahi rakha. Placeholder and each partial update short transaction boundaries use karte hain, reducing connection retention. Trade-off: multiple writes aur intermediate states.
+
+Q23. Kya branch Flyway migration own karti hai?
+Answer:
+Nahi. Is branch phase me schema evolution Hibernate ddl-auto context me hui; dedicated branch-owned migration evidence nahi hai. Production rollout me explicit migration required hoti.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q24. Exact API contract?
+Answer:
+Controller mapping /chat/stream/active hai aur servlet context ke saath effective path GET /api/v1/chat/stream/active. 200 body ActiveStreamStatusDto; idle par 204; principal issue par 401. It is status/read API, stream transport nahi.
+
+Q25. REST polling aur STOMP dono kyun?
+Answer:
+STOMP low-latency live chunks deta hai; REST authoritative recovery snapshot/probe deta hai jab socket continuity break ho. Dono consistency model ko explicitly handle karna padta hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q26. Frontend recovery state machine me important refs kya guard karte hain?
+Answer:
+Current chat/user/stream IDs, current connection identity, polling timer aur abort controllers stale async completion se protect karte hain. React state alone delayed closures ke against enough nahi hoti.
+
+Q27. Improvement kya karoge?
+Answer:
+Recovery logic ko tested reducer/state machine me extract, explicit states IDLE/STREAMING/DISCONNECTED/RECOVERING/FAILED define, timers centralized cleanup, aur user-visible retry/partial badge add karunga.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q28. Registry thread safety enough hai?
+Answer:
+ConcurrentMap local mutations ko safer banata hai, but distributed atomicity nahi deta. Later Redis metadata improve karta hai, phir bhi Reactor Disposable process-local rehta hai.
+
+Q29. Duplicate resume ka risk?
+Answer:
+Same clientStreamId duplicate detection and current-stream identity duplicate work reduce karte hain. Exactly-once generation prove nahi hoti; idempotency record plus lease/version stronger design hoga.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q30. Main costs kya hain?
+Answer:
+Periodic DB writes, polling reads, repeated message-history fetch, and React reconciliation. No benchmark/load-test evidence hai, so throughput or optimal 400 ms cadence claim nahi karunga.
+
+Q31. Scale improvement?
+Answer:
+Incremental message fetch/version endpoint, exponential backoff with jitter, write coalescing, indexes, recovery metrics, and durable broker/event log evaluate karunga.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q32. Owned commits me tests?
+Answer:
+Automated reconnect tests add nahi hue. Yeh explicit gap hai, not implicit coverage.
+
+Q33. Minimum test matrix?
+Answer:
+Controller 200/204/401; owner isolation; partial persistence cadence/final completion; disconnect at chunk boundaries; stale old socket callback; STOP-reconnect race; duplicate resume; AbortController cleanup; backend restart; and multi-tab E2E.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q34. Production architecture ka next step?
+Answer:
+Stream execution owner ko lease ke saath model, metadata Redis me, events durable broker/stream me, workers idempotent, and API nodes stateless. Health metrics: active streams, recovery latency, partial-write failures, stale callbacks, cancelled streams.
+
+Q35. Is implementation production-ready thi?
+Answer:
+It materially improves resilience, but no chaos/load/integration tests, no durable event replay, and local execution ownership remain. Isliye “production hardened” nahi, “recovery foundation” kehna accurate hai.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q36. Trick: 204 ka matlab generation complete hai?
+Answer:
+Strictly it means registry me current principal ka active stream nahi mila. Completion, cancellation, expiry, or lost metadata distinguish karne ke liye persisted message state bhi inspect karna hoga.
+
+Q37. Trick: partial row means model still active?
+Answer:
+Nahi. generationComplete=false stale ho sakta hai after crash. Registry/status plus timestamps/lease and reconciliation required hain.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q38. Reconnect architecture later kaise evolve hui?
+Answer:
+339d9d7/492d39c ne active status, partial persistence and stale guards diye. f3fb373 ne tab ownership/heartbeat/render handling harden ki. e844265 ne metadata Redis me externalize kiya with local fallback; execution Disposable fully distributed nahi hua.
+
+Q39. Responsive sidebar se overlap?
+Answer:
+492d39c ka unused useSidebarState.js reconnect ownership ka runtime feature nahi hai. Actual responsive sidebar commits 7957016/59906c6 hain.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q40. Five facts?
+Answer:
+Owners 339d9d7/492d39c; endpoint /api/v1/chat/stream/active; DTO field assistantMessageId; partial persistence about 400 ms; useSidebarState.js added but unused.
+
+Q41. Biggest limitation?
+Answer:
+Recovery snapshot/persistence exists, durable chunk replay and proven exactly-once distributed execution nahi.
+
+Q42. Best interview closing line?
+Answer:
+“Maine transport reconnect ko application recovery se separate kiya, durable partial state aur correlation guards add kiye, aur honestly note kiya ki later Redis metadata ke baad bhi execution ownership fully distributed nahi thi.”

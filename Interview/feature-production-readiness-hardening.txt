@@ -1,0 +1,261 @@
+INTERVIEW PREPARATION
+Branch: feature/production-readiness-hardening
+
+PROJECT CONTEXT
+Canonical merged lineage is `b667f16`, `79867c7`, `ee34e83`, `c291a9f`, `0879ea8`, `93be5d5`, `3a57294`, `9ab6087`, `050339d`. Local branch tip stale/diverged hai. Work includes env externalization, Flyway V1/V2, `ddl-auto=validate`, Actuator, CI/PostgreSQL and conflict resolution; later `@ActiveProfiles("local")` login-page ownership hai.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Environment-based configuration ka basic purpose kya hai?
+
+Answer:
+Deploy-specific values source code se separate hote hain. Environment variables secret manager nahi, but checked-in literals se better boundary hain.
+
+Q2. Flyway kya solve karta hai?
+
+Answer:
+Ordered, versioned SQL migrations aur schema history deta hai, so database evolution reproducible/reviewable hoti hai.
+
+Follow-up Q2.1: Applied migration file edit karna safe hai?
+
+Answer:
+Usually nahi; checksum mismatch aur environment divergence ho sakti hai. New corrective migration add karna safer pattern hai.
+
+Q3. `ddl-auto=validate` ka meaning kya hai?
+
+Answer:
+Hibernate mappings schema se match karte hain ya startup fail hota hai; production schema automatically mutate nahi hota.
+
+Q4. Actuator ka use kya hai?
+
+Answer:
+Health, info aur operational endpoints expose karta hai for monitoring/orchestration; exposure carefully configure karni hoti hai.
+
+Follow-up Q4.1: Health endpoint green hone se all dependencies proven hain?
+
+Answer:
+Sirf configured health contributors jitna. Redis/Ollama readiness automatically proven nahi jab tak indicators/config evidence na ho.
+
+Q5. CI me PostgreSQL service kyun valuable hai?
+
+Answer:
+Build/tests production-like SQL dialect/schema behavior ke closer run hote hain than unrelated in-memory DB.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q6. Sensitive config commit ka exact role kya tha?
+
+Answer:
+`b667f16` ne sensitive values ko environment placeholders ki taraf move kiya aur ignore/dependency config adjust ki.
+
+Q7. Flyway lineage me V1/V2 kaise evolve hue?
+
+Answer:
+`79867c7` ne Flyway posture aur V2 `model_name` add ki; `050339d` ne initial V1 schema add/align karke normal CI package restore ki.
+
+Q8. Actuator change ne security me kya kiya?
+
+Answer:
+`ee34e83` ne monitoring dependency/config aur actuator path permit rules add kiye; business endpoints unchanged.
+
+Q9. Conflict-resolution commit ka notable edit behavior kya tha?
+
+Answer:
+`c291a9f` ne edited message ko retimestamp karna aur later messages delete karna disable kiya, so position/tail preserve hue.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q10. Flyway plus Hibernate validate kyun, sirf auto-DDL kyun nahi?
+
+Answer:
+Flyway explicit reviewable migrations own karta hai; validate mapping drift fail-fast detect karta hai. Auto-DDL production changes opaque/risky bana sakta hai.
+
+Q11. Secrets env me rakhna complete security solution kyun nahi?
+
+Answer:
+Process environment/logs/deployment config se exposure possible hai. Managed secret store, rotation, least privilege aur masking still needed.
+
+Q12. Health/info public karne ka trade-off?
+
+Answer:
+Operational reachability easy hoti hai, but metadata exposure aur reconnaissance risk badhta hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q13. Fresh production startup flow kya hoga?
+
+Answer:
+Env resolve → datasource connect → Flyway V1/V2 apply/history record → Hibernate schema validate → app/Actuator ready.
+
+Q14. CI workflow evolution explain karo.
+
+Answer:
+`0879ea8` workflow added; env passed in `93be5d5`; PostgreSQL service `3a57294`; `9ab6087` temporary `-DskipTests`; `050339d` V1 ke baad `mvn clean package` restore.
+
+Q15. Edit regeneration flow me changed invariant kya hai?
+
+Answer:
+Existing answer same row position/timestamp context me update hota hai and later rows remain. This avoids destructive truncation but can leave semantically stale downstream conversation.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q16. `baseline-on-migrate` kab useful aur risky hai?
+
+Answer:
+Existing non-empty DB ko Flyway history me onboard kar sakta hai; wrong baseline legacy schema differences hide kar sakta hai, so rehearsal essential hai.
+
+Q17. CI pass production readiness prove karta hai?
+
+Answer:
+Nahi. Current lineage mainly build/context/database startup confidence deta hai; Redis/Ollama failure modes, load, security and migrations-at-scale still unproven.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q18. Required env missing ho to kya expect karoge?
+
+Answer:
+Placeholder resolution/startup or dependency connection fail ho sakti hai. Fail-fast validation should identify key name without logging value.
+
+Q19. Legacy schema V1 se different ho to?
+
+Answer:
+Baseline/migration/validate conflict startup block kar sakta hai. Snapshot rehearsal and reconciliation migration chahiye, manual production edits nahi.
+
+Q20. Rolling deploy me old app aur new schema incompatible ho to?
+
+Answer:
+Partial fleet fail ho sakti hai. Expand-contract migrations and backward-compatible rollout sequence use karna chahiye.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q21. Migration halfway fail ho to recovery kya hai?
+
+Answer:
+Flyway transaction support/database behavior par rollback/history state depend karega. Root cause fix karke controlled repair/retry; blindly history row edit nahi.
+
+Q22. CI PostgreSQL ready na ho to?
+
+Answer:
+Connection failure build fail karegi; service health/readiness wait and deterministic credentials/config needed.
+
+Q23. Edit streaming ke baad DB write fail ho to inconsistency kyun possible hai?
+
+Answer:
+Client ko external stream text mil chuka ho sakta hai while DB transaction rollback hota hai; external side effect transaction me rollback nahi hota.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q24. Actuator production exposure kaise restrict karoge?
+
+Answer:
+Only required endpoints, details policy, internal management network/port or authentication, and no sensitive env/config output.
+
+Q25. CI secrets kaise handle karoge?
+
+Answer:
+Repository literals avoid, scoped CI secrets, masked logs, short-lived credentials where possible and no secret echo.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q26. V1 aur V2 ka verified database scope kya hai?
+
+Answer:
+V1 initial schema create karta hai; V2 `chat_sessions` model-name evolution handle karta hai. Prod Hibernate mode validates.
+
+Q27. Concurrent app starts par Flyway kya karta hai?
+
+Answer:
+Schema-history locking migration execution serialize/coordinate karta hai; application business transactions ko lock nahi karta.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q28. Kya hardening branch ne new business API add ki?
+
+Answer:
+Nahi. Operational health/info surface add hui; business endpoint contract feature nahi.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q29. Frontend conflict resolution ko production-hardening me kaise describe karoge?
+
+Answer:
+It was integration repair in `c291a9f`, not a new standalone UI architecture. ChatApp/websocket changes ko that commit ke exact diff tak bound rakhna chahiye.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q30. Flyway lock ka scope aur limitation kya hai?
+
+Answer:
+Migration coordination only. Concurrent chat edits, streams ya refresh-token replay solve nahi hote.
+
+Q31. Non-last message edit preserve karne ka concurrency/consistency concern?
+
+Answer:
+Later messages old answer context par based ho sakte hain. Product semantics, versioning and regression tests required.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q32. Hardening-related performance metrics kya honge?
+
+Answer:
+Startup time, migration duration, CI duration, datasource readiness and Actuator latency. No unmeasured speed improvement claim.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q33. Actual test evidence accurately kaise state karoge?
+
+Answer:
+CI and PostgreSQL service added. Tests temporarily skipped then normal package restored; only pre-existing context-load evidence. Later `@ActiveProfiles("local")` this branch ka nahi.
+
+Q34. Migration tests ka useful matrix?
+
+Answer:
+Fresh DB V1→V2, representative legacy baseline, invalid schema validation failure, repeat startup idempotence and rollback rehearsal.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q35. Production rollout checklist?
+
+Answer:
+Managed secrets/injection validation, DB backup, migration rehearsal, compatible app rollout, restricted Actuator, health alerts and rollback/runbook.
+
+Q36. Database rollback simple git revert kyun nahi?
+
+Answer:
+Applied migrations durable state hain; app revert schema compatibility demand karta hai. Forward-fix or tested undo strategy chahiye.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q37. Local branch tip ko canonical kyun nahi maanoge?
+
+Answer:
+It is stale/diverged. Merged remote/main lineage ke nine commits actual integrated hardening evidence hain.
+
+Q38. Environment variables ka matlab secret committed nahi hua—always true?
+
+Answer:
+Only if defaults/config/history/logs me value absent ho. Externalization pattern alone repository-wide secret audit replace nahi karta.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q39. Later `@ActiveProfiles("local")` change kis branch ka hai?
+
+Answer:
+`feature/login-page` (`645a74d`), hardening lineage ka nahi.
+
+Q40. Refresh V3 aur pin V6 ko hardening migration bol sakte hain?
+
+Answer:
+Nahi. They are later feature-owned migrations; hardening verified scope V1/V2 hai.
+
+SECTION 18 — RAPID REVISION
+
+Q41. Rapid lineage recall?
+
+Answer:
+`b667f16` env; `79867c7` Flyway/V2; `ee34e83` Actuator; `c291a9f` conflicts; `0879ea8`→`050339d` CI/V1 evolution.
+
+Q42. Top caveats?
+
+Answer:
+Stale local tip, public actuator review, baseline rehearsal, shallow tests, no later ActiveProfiles attribution.

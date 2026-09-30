@@ -1,0 +1,276 @@
+FEATURE: USER CHAT HISTORY — INTERVIEW PREPARATION
+Evidence: PR #7-owned commit f41fd74, branch-tip commit 22b0d98, corresponding docs and commit snapshots.
+
+PROJECT CONTEXT
+`f41fd74` is the actual PR #7 history commit: it added authenticated session CRUD/history APIs, owner-scoped service methods, WebSocket session/message correlation, `chatApi.js`, and sidebar load/select/create/delete/rename behavior. `22b0d98` was the feature branch tip and added frontend-only draft-chat/WebSocket lifecycle evolution, but it entered main through reconnect PR #9. Interview answers must keep that lineage caveat explicit instead of attributing all of 22b0d98 to PR #7.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Chat history feature ka core goal kya hai?
+Answer: User ke conversations ko durable sessions aur ordered messages ke form me store, list, reopen, rename, delete, aur streaming results ke saath correlate karna.
+
+Q2. Session aur message alag entities kyun?
+Answer: Session conversation-level metadata/title/owner represent karta hai; messages ordered turns represent karte hain. One-to-many lifecycle clean hota hai.
+
+Follow-up: Branch ownership?
+Answer: PR #7 owns `f41fd74`; `22b0d98` branch tip reconnect PR #9 se main me gaya.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q3. `ChatServiceImpl.createEmptySession` kya karta hai?
+Answer: Current authenticated user resolve karke “New chat” title aur timestamp ke saath `ChatSession` save karta hai.
+
+Q4. `resolveStreamingSessionForUser` kya karta hai?
+Answer: Username resolve karta hai; null session id par first line se titled session create karta hai, otherwise `findByIdAndUser_Id` se owner-scoped existing session return karta hai.
+
+Follow-up: Transaction style?
+Answer: Streaming lifecycle long-lived hai, isliye method short `TransactionTemplate` block use karta hai instead of stream ko open DB transaction me rakhna.
+
+Q5. `persistWebsocketTurn` kya karta hai?
+Answer:
+Historical/branch behavior:
+Owner-scoped session me NEW turn save ya EDIT target update hota tha; client bubble IDs carry hote the; edit ke baad target se later messages delete kiye jate the; session-title refresh bhi invoke hota tha.
+
+Current main behavior:
+`persistWebsocketTurn` me later-message deletion call commented out hai. Isliye current code edit target update karta hai, lekin historical truncation ko active current behavior nahi kehna chahiye.
+
+Production improvement:
+Edit semantics explicitly define karo—truncate, branch, ya retain—and integration tests se chosen policy verify karo.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q6. Session lookup owner id ke saath kyun?
+Answer: Plain primary-key lookup cross-user data exposure/mutation allow kar sakta hai. `sessionId + userId` authorization ko repository boundary me enforce karta hai.
+
+Q7. Client bubble IDs DB me kyun?
+Answer: Frontend temporary IDs aur backend persisted messages correlate hote hain, especially edit/regeneration and reconnect evolution me.
+
+Follow-up: DB-generated id alone enough kyun nahi?
+Answer: Streaming UI DB save se pehle bubble render karta hai; client-generated id immediately available hoti hai.
+
+Q8. Draft chat frontend-only kyun?
+Answer: Blank “New chat” clicks se unused DB rows avoid hote hain. Real session first actual send par create hoti hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q9. App load flow trace karo.
+Answer: Token ke saath `fetchChatSessions` → sessions state mapping → selected session par `fetchSessionMessages` → persisted rows ko user/assistant bubbles me map → active chat render.
+
+Q10. New chat draft flow?
+Answer: `createNewChat` existing empty draft reuse karta hai, otherwise `draft-${Date.now()}` local chat add karta hai. First send `createRealChatAndSend` POST session karta hai, draft replace karta hai, then actual send schedule karta hai.
+
+Follow-up: `setTimeout(..., 0)` kyun?
+Answer: Real chat id/ref update ke baad send next task me chalane ke liye. Yeh pragmatic sequencing hai, formal state machine nahi.
+
+Q11. Stream persistence flow?
+Answer: STOMP payload `sessionId`, `userMessageId`, assistant `messageId`, content and prior messages carry karta hai; backend owned session resolve karta hai; completed/edited turn transactional method se save hota hai.
+
+Q12. Rename flow?
+Answer: Frontend name trim karta hai → PATCH title API → backend validated `UpdateSessionTitleRequest` → owner-scoped entity update → returned title local state me merge.
+
+Q13. Delete flow?
+Answer: DELETE API → owner check → session messages delete → session delete → frontend list remove and active selection adjust.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q14. Multiple active sidebar selection bug kaise avoid hua?
+Answer: Single `activeChatId` state/ref and id equality se active class derive hoti hai; selected chat history separately load/map hoti hai.
+
+Q15. `chatApi.js` kyun?
+Answer: Authorization headers, URLs, response checks, aur JSON handling UI orchestration se separate hote hain.
+
+Follow-up: Kya API wrapper caching karta hai?
+Answer: Is branch evidence me dedicated cache layer nahi; React state loaded messages/sessions hold karti hai.
+
+Q16. Title auto-generation?
+Answer: New streaming session first user line se title build kar sakti hai; explicit empty session “New chat” se start hoti hai and service later refresh logic rakhta hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q17. User draft banaye but message na bheje?
+Answer: Draft frontend-only rehta hai; DB row create nahi hoti. Reload par draft lost hona expected hai.
+
+Q18. Foreign user ka session id pass ho?
+Answer: `findByIdAndUser_Id` no match deta hai; service `SESSION_NOT_FOUND` runtime error throw karti hai. Existence leak reduce hota hai.
+
+Q19. Session stream ke beech delete ho?
+Answer: Persistence time owner-scoped session lookup fail kar sakta hai. Frontend branch streaming ke time delete guard karti hai, but cross-tab/server race still possible hai.
+
+Follow-up: Atomic guarantee?
+Answer: REST delete aur long stream same transaction nahi hain; explicit stream/session lifecycle coordination absent hai.
+
+Q20. Duplicate assistant client id aaye?
+Answer: Repository helper/correlation logic exact snapshot ke according lookup kar sakti hai, but DB-level unique constraint evidence is branch docs me established nahi; strict dedupe guarantee claim nahi karunga.
+
+Q21. History empty ho?
+Answer: API empty list de sakti hai; frontend chat empty state render karta hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q22. Session not found ka status?
+Answer: Service RuntimeException throw karti hai; documented current global mapping 400 deta hai, dedicated 404 nahi.
+
+Q23. History fetch fail ho to?
+Answer: `chatApi` non-OK response throw karta hai; `ChatApp` catch/log path use karta hai. Rich user-visible retry/error state branch evidence me limited hai.
+
+Follow-up: Optimistic delete rollback?
+Answer: Code API success ke baad local remove karta hai, so backend failure par list retained hai; user-facing error mostly console tak limited ho sakta hai.
+
+Q24. WebSocket completion ke baad DB save fail?
+Answer: UI stream aur durable history diverge kar sakte hain. Transaction DB changes rollback karti hai, but already-delivered chunks rollback nahi hote.
+
+Q25. Rename blank ho?
+Answer: Frontend trim guard aur `UpdateSessionTitleRequest` validation dono relevant hain; blank request reject/no-op hoti hai.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q26. Authorization kis layer par?
+Answer: SecurityContext/current username resolve hota hai, then every session read/update/delete path owner-scoped repository lookup use karti hai.
+
+Q27. Direct entity response risk?
+Answer: Controller `ChatSession`/`Message` entities return karta hai. DTO projection future me internal fields/relationships expose hone ka risk reduce karega.
+
+Follow-up: UI me session id guess karna enough hai?
+Answer: Nahi; backend owner condition final enforcement hai. Client hiding security control nahi.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q28. Data relationship kya hai?
+Answer: `User` owns many `ChatSession`; session owns many `Message`. Message user text, AI response, timestamp, and client correlation fields carry karti hai.
+
+Q29. Ordering kaise hoti hai?
+Answer: Repository `findByChatSession_IdOrderByTimestampAsc` history chronological order me load karta hai.
+
+Q30. Delete messages separately kyun?
+Answer: Service explicitly `deleteByChatSession_Id` then session delete karti hai. Cascade behavior assume karne ke badle verified service order explain karunga.
+
+Follow-up: Pagination thi?
+Answer: Is branch endpoint full list return karta hai. DB-level pagination later chat-search evolution me aayi.
+
+Q31. Transaction boundaries?
+Answer: CRUD methods `@Transactional`; read methods read-only; stream-related short writes `TransactionTemplate` me execute hote hain.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q32. Exact endpoints/statuses?
+Answer: GET `/api/v1/chat/sessions` 200; POST same path 201; DELETE `/sessions/{id}` 200 empty; PATCH `/sessions/{id}/title` 200; GET `/sessions/{id}/messages` 200.
+
+Q33. Why REST for history and STOMP for generation?
+Answer: CRUD/list/history finite request-response operations hain; token streaming asynchronous incremental events ke liye STOMP suited hai.
+
+Follow-up: DELETE 204 kyun nahi?
+Answer: Current implementation 200 empty body return karti hai. 204 alternative ho sakta hai, but actual contract 200 hai.
+
+Q34. API idempotency?
+Answer: GET idempotent hai; repeated DELETE second time not-found error de sakta hai; repeated POST sessions duplicates create kar sakta hai; idempotency key implemented nahi.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q35. State aur refs dono kyun?
+Answer: State rendering trigger karti hai; refs async WebSocket callbacks ko latest active chat/stream values deti hain without stale closures.
+
+Q36. Persisted message ko bubbles me kaise map karte hain?
+Answer: Each DB turn se user bubble and assistant bubble derive hote hain, client ids available ho to reuse hote hain, aur response linkage build hoti hai.
+
+Follow-up: Mapping risk?
+Answer: Missing/duplicate client ids, null AI response, and ordering assumptions component tests demand karte hain.
+
+Q37. Existing empty draft reuse kyun?
+Answer: Repeated New Chat clicks multiple blank sidebar rows create na karein.
+
+Q38. `22b0d98` ka frontend effect?
+Answer: Draft conversion, WebSocket lifecycle/ref cleanup, InputBox simplification, and connection stability refactor. Main entry lineage reconnect PR #9 hai.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q39. Selection response race?
+Answer: User A session select karke quickly B select kare to A fetch late return karke stale state overwrite kar sakti hai unless current selection/cancellation checked ho. Explicit AbortController evidence nahi hai.
+
+Q40. Delete versus stream race?
+Answer: UI same-tab delete streaming guard karti hai; cross-tab/API race backend persistence failure produce kar sakti hai.
+
+Q41. EDIT transaction kya karti hai?
+Answer:
+Historical/branch behavior:
+Target turn owner session me find karke text/response/id/timestamp update aur save hota tha; target ke baad later turns delete karke linear conversation consistency restore karne ka intent tha.
+
+Current main behavior:
+`ChatServiceImpl.beginStreamingTurn` aur `persistWebsocketTurn` dono me later-message deletion calls commented out hain. Current code therefore edit/update karta hai, lekin subsequent turns truncate nahi karta.
+
+Production improvement:
+Product-level edit model choose karo: destructive truncation, explicit conversation branching, ya retained history with stale-descendant markers. Transaction and concurrency tests us policy ko enforce karein.
+
+Follow-up: Concurrent edit locking?
+Answer: Explicit optimistic version/pessimistic lock evidence nahi; last-write or delete race possible hai.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q42. Biggest branch performance issue?
+Answer: Sessions aur complete message history unpaginated lists me load hoti thi; long chats memory, DB, network, and render cost badhate hain.
+
+Q43. Required indexes?
+Answer: User-to-session listing and session-to-message ordered lookup indexes useful hain. Exact migration ownership ko is branch se invent nahi karunga.
+
+Follow-up: Improvement?
+Answer: Cursor/page-based history, DTO projection, virtualized rendering, incremental load, and query metrics.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q44. Actual test evidence?
+Answer: This branch added no verified behavior tests for controllers, services, ownership, WebSocket persistence, or React history UI.
+
+Q45. Backend tests?
+Answer: Cross-user session IDs, CRUD statuses, blank title, ordered messages, transaction rollback, edit truncation, duplicate client ids, delete-during-stream, and query pagination future behavior.
+
+Q46. Frontend tests?
+Answer: Load/select race, one active row, draft reuse/abandonment, first-send conversion, API failure, rename/delete, persisted mapping, reconnect callbacks, and stale response protection.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q47. Scale design?
+Answer: Paginated APIs, DTOs, optimistic locking/versioning, idempotency keys, explicit stream/session state, distributed event routing, cache policy, and observability.
+
+Q48. Data retention?
+Answer: Branch hard-delete supports deletion, but retention/export/audit policy evidence nahi hai. Production requirement ke basis par define karna hoga.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+OWNERSHIP / EVIDENCE SUBSECTION
+
+Q49. PR #7 ko kya credit dena safe hai?
+Answer: `f41fd74`: session CRUD/history, owner scoping, correlation fields/persistence, `chatApi`, and sidebar selection/history behavior.
+
+Q50. `22b0d98` ko kaise describe karna?
+Answer: User-history branch tip ka draft/WS evolution, but it entered main through reconnect PR #9. Feature lineage aur merge ownership both mention karunga.
+
+TRICK / CROSS SUBSECTION
+
+Q51. Draft chat durable hai?
+Answer: Nahi. First send se pehle frontend-only hai.
+
+Q52. Owner-scoped lookup authentication replace karti hai?
+Answer: Nahi. Authentication username establish karta hai; owner lookup authorization enforce karta hai. Dono needed hain.
+
+Q53. 200 DELETE ka matlab messages guaranteed physically erased?
+Answer: Service delete calls complete hui hain; backups, replicas, logs, or retention policy ke physical erasure ki guarantee branch nahi deti.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q54. Stream-stop branch se dependency?
+Answer: Typed `clientStreamId`/message-id envelopes and NEW/EDIT flow foundation provide karte hain; history branch `sessionId` and durable mapping add karti hai.
+
+Q55. Reconnect branch relation?
+Answer: `22b0d98` main me reconnect PR #9 ke through aaya, and later reconnect commits partial persistence/recovery further harden karte hain.
+
+Follow-up: Search branch relation?
+Answer: Later chat-search added search and DB-level pagination. Original history branch ko those capabilities attribute nahi karenge.
+
+SECTION 18 — RAPID REVISION
+- PR #7 owner: `f41fd74`.
+- Branch tip: `22b0d98`; main entry through reconnect PR #9.
+- REST: list/create/delete/rename sessions and fetch messages.
+- Security: every session operation owner-scoped.
+- Persistence: users → sessions → messages; client bubble IDs correlate UI/DB.
+- Draft: frontend-only until first send, then real session created.
+- Actual tests: no verified behavior tests.
+- Main gaps: pagination, DTOs, stale-fetch cancellation, locking/idempotency, visible failure UX.

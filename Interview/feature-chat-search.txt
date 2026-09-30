@@ -1,0 +1,257 @@
+FEATURE/CHAT-SEARCH — INTERVIEW PREPARATION
+Evidence: owned sequence 9dd63af, 61d3916, 45cef8c, 6e79b84; corresponding docs, diffs, and current source at a62003a.
+Scope note: 51ad3cc search dialog/highlighting is a separate branch evolution. Owned commits contain no automated search/pagination tests.
+
+PROJECT CONTEXT
+===============
+Q1. Feature evolution kya thi?
+Answer:
+Complete owned sequence `9dd63af`, `61d3916`, `45cef8c`, aur `6e79b84` hai. Git range likhna ho to first commit include karne ke liye `9dd63af^..6e79b84` use hoga; `9dd63af..6e79b84` first commit ko exclude karta hai.
+
+* `9dd63af`: search API, repositories, aur DTO
+* `61d3916`: sidebar search UI
+* `45cef8c`: message-history DB paging
+* `6e79b84`: collapsed-sidebar search icon
+
+Q2. Search kis data par hoti hai?
+Answer:
+Current authenticated user ki chat-session titles aur owned sessions ke user/AI message content par case-insensitive LIKE matching. Service results ko SearchResultDto previews me map aur merge karta hai.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q3. LIKE search kya hai?
+Answer:
+SQL/JPQL pattern matching; project lower-case fields/keyword with %keyword% style substring match use karta hai. Simple hai but large text corpus par scan-heavy ho sakta hai.
+
+Q4. Pagination kyun?
+Answer:
+Large chat history ko full memory me load karna response size, heap and latency badhata hai. PageRequest limit/offset/order DB ko push karta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q5. SearchServiceImpl.search flow?
+Answer:
+Blank query par empty list return hoti hai. Service current user resolve karke pehle title matches ko result list me append karti hai, phir message-content matches append karti hai. Message content preview normalize/truncate hota hai. Combined list par koi global timestamp sort ya deduplication step nahi hai.
+
+Q6. Ownership query me kahan enforce hai?
+Answer:
+Repository predicates chat session ke user ID/principal scope ko include karte hain. UI filtering authorization boundary nahi hai.
+
+Q7. Pagination endpoint ka subtle behavior?
+Answer:
+GET messages me page aur size dono present hon to validation/paged path. Current condition me agar ek bhi absent ho, request unpaged path le sakti hai. Production contract me either both required together or defaults explicit hone chahiye.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q8. Search logic controller me kyun nahi?
+Answer:
+Controller HTTP concerns rakhe; service current-user resolution, merge, preview rules and transaction boundary centralize kare. Repository query responsibility persistence layer me rahe.
+
+Q9. Elasticsearch/Postgres FTS kyun nahi initially?
+Answer:
+LIKE implementation low-complexity baseline tha and no extra infrastructure. Scale, relevance, typo tolerance or ranking need par PostgreSQL tsvector/trigram or dedicated search engine evaluate karunga.
+
+Q10. In-memory pagination kyun wrong thi?
+Answer:
+Database se full dataset fetch karke Java me slice karna network/heap cost already pay kar deta hai. 45cef8c ne PageRequest repository query me apply karke actual bounded fetch banaya.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q11. GET search request trace karo.
+Answer:
+Frontend searchChatsApi query ko URLSearchParams se encode karke GET /api/v1/search?q=... call karta hai. Security principal establish karti hai; SearchController service ko delegate karta hai; service owner-scoped title/content queries call karke DTO list return karta hai.
+
+Q12. Result click flow?
+Answer:
+UI target session select/load karti hai. This branch sidebar search list/navigation own karti hai; source-message highlighting modal behavior later 51ad3cc me aaya.
+
+Q13. DB paging flow?
+Answer:
+Controller page/size inspect karta hai, service owner-scoped session access validate karta hai, MessageRepository Pageable query ordered page fetch karti hai, and response limited rows return karta hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q14. Follow-up: blank query behavior?
+Answer:
+Service empty result return karti hai; unnecessary wildcard-all scan avoid hota hai. Frontend trimmed empty query submit disable/clear karti hai.
+
+Follow-up Q14.1. Whitespace-only input?
+Answer:
+Trim ke baad blank treat hona chahiye. API ko frontend validation par alone depend nahi karna chahiye.
+
+Q15. Follow-up: title aur message duplicate session results?
+Answer:
+Current service deduplicate nahi karti. Ek session title match ke roop me ek result de sakta hai aur usi session ke har matching message ka separate `MESSAGE` result bhi aa sakta hai. Title results pehle append hote hain; uske baad message results.
+
+Follow-up Q15.1. Kya multiple matching messages ek result me collapse hote hain?
+Answer:
+Nahi. Har matching `Message` row ka separate `SearchResultDto` banta hai. Same session isliye result list me multiple baar aa sakti hai.
+
+Follow-up Q15.2. Preview ka role?
+Answer:
+Preview user ko match context deta hai; raw full message payload response me bhejna unnecessary bandwidth/privacy exposure ho sakta hai.
+
+Q16. Follow-up: wildcard characters?
+Answer:
+Parameterized JPQL injection se protect karta hai, but % and _ LIKE wildcards ki semantics affect kar sakte hain if not escaped. Literal-search requirement ho to explicit escaping and ESCAPE clause add karunga.
+
+Follow-up Q16.1. Parameter binding kya `%` aur `_` ko literal bana deti hai?
+Answer:
+Nahi. Binding SQL injection risk reduce karti hai, lekin LIKE wildcard semantics automatically escape nahi karti.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q17. Concurrent delete ke baad result click?
+Answer:
+Search result stale ho sakta hai; session/message load 404/empty or owner-check failure handle karke UI result clear and non-destructive feedback de.
+
+Q18. New messages pages ke beech insert hon?
+Answer:
+Offset pagination duplicate/skip produce kar sakti hai if ordering dataset changes. Stable secondary key and cursor/keyset pagination stronger option hai.
+
+Q19. Very large query?
+Answer:
+Input length cap, rate limiting, timeout and query metrics useful. Existing branch me such guarantees invent nahi karunga.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q20. Repository failure?
+Answer:
+Read-only operation fails through exception mapping; UI search state ko loading=false and empty/error distinction maintain karna chahiye. Silent empty result outage ko “no matches” jaisa dikha sakta hai.
+
+Q21. Invalid page/size?
+Answer:
+Explicit paged path page<0 or size<=0 reject karta hai and current global RuntimeException mapping 400 produce kar sakti hai. Better typed validation exception and max-size cap hai.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q22. IDOR kaise prevent hota hai?
+Answer:
+Queries current authenticated owner ko predicate me bind karti hain; arbitrary session ID alone sufficient nahi. Message loading bhi owner-scoped lookup use kare.
+
+Q23. Search data leakage concerns?
+Answer:
+Current `SearchServiceImpl` INFO level par raw `incomingQuery` aur trimmed `normalizedKeyword` log karti hai. Isse private search terms log storage, retention, aur operator access ke scope me aa sakte hain.
+
+Production improvement:
+Raw query redact/hash karo ya content-free metadata log karo; previews bounded rakho; React escaping preserve karo; owner-scoped errors se another user's resource existence reveal na karo. LIKE parameters bound hain, string-concatenated SQL nahi.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q24. New migration?
+Answer:
+Nahi. Branch repository queries aur paging add karti hai, schema migration nahi.
+
+Q25. Indexing limitation?
+Answer:
+Leading-wildcard lower(content) B-tree index typically effective nahi. PostgreSQL trigram GIN or full-text index scale improvement hai; benchmark evidence currently absent hai.
+
+Q26. Ordering stable kaise karoge?
+Answer:
+Timestamp descending ke saath unique ID descending tie-breaker. Otherwise equal timestamps pages me nondeterministic order de sakte hain.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q27. Exact endpoints?
+Answer:
+GET /api/v1/search?q=... and GET /api/v1/chat/sessions/{id}/messages?page=&size=. Search returns List<SearchResultDto>; messages supports unpaged compatibility and both-params paged path.
+
+Q28. Better pagination response?
+Answer:
+Rows ke saath page, size, totalElements/hasNext or cursor return karunga. Current plain collection consumer ko next-page metadata nahi deti.
+
+Q29. GET appropriate hai?
+Answer:
+Yes, read-only/idempotent search semantics ke liye. Sensitive queries URL/browser/proxy logs me aa sakti hain, so logging policy relevant hai; highly sensitive complex search POST decision justified ho sakta hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q30. SearchBar responsibilities?
+Answer:
+`SearchBar` controlled input render karta hai, submit eligibility calculate karta hai, form submit par `onSearch` call karta hai, aur clear action `onClear` ko delegate karta hai. `ChatApp` search API state, result-list rendering, result click handling, aur chat navigation own karta hai.
+
+Q31. Out-of-order responses ka risk?
+Answer:
+User query A ke baad B search kare and A late aaye to stale overwrite possible. Improvement AbortController/request sequence ID and debounce hai; current feature ko cancellation-guaranteed claim nahi karunga.
+
+Q32. Collapsed icon ka purpose?
+Answer:
+Collapsed desktop rail me feature discoverability retain karna; 6e79b84 visual affordance owns karta hai. Dialog behavior is separate 51ad3cc.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q33. Search transaction isolation kya guarantee karti hai?
+Answer:
+Read-only service intent mark kar sakta hai, but title and message two queries necessarily one immutable snapshot guarantee nahi unless transaction/isolation supports it. Eventual minor inconsistency acceptable UX ho sakti hai.
+
+Q34. Streaming message during search?
+Answer:
+Partial DB text search timing-dependent ho sakta hai. Product policy define kare whether generationComplete=false rows searchable hain; current branch behavior query data state follow karega.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q35. Bottlenecks?
+Answer:
+Two LIKE scans, unbounded search result list, preview mapping/merge, and repeated UI requests. Message history paging improved hua, search results themselves paged nahi dikhte.
+
+Q36. Optimize kaise?
+Answer:
+Query minimum/maximum length, debounce/cancel, result limit/page, trigram/FTS index, explain analyze, cache only if privacy/invalidation clear, and p95 latency/zero-result metrics.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q37. Existing tests?
+Answer:
+Owned commits me automated search/pagination tests nahi.
+
+Q38. Backend tests?
+Answer:
+Repository owner isolation, case-insensitive title/content, blank query, wildcard literal policy, merge ordering, page boundaries, stable order, invalid params, and one-param behavior.
+
+Q39. Frontend/E2E tests?
+Answer:
+Submit/clear/loading, stale response race, collapsed affordance, deleted result, keyboard accessibility, network error, and large result rendering.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q40. Million-message scale design?
+Answer:
+PostgreSQL FTS/trigram with tenant filter and indexed document columns se start; bounded/cursor results; async index only if needed. Dedicated engine me ACL/owner field compulsory and deletion consistency monitored.
+
+Q41. Observability?
+Answer:
+Latency by query path, DB rows scanned, result count, cancellation rate, error rate, index hit/explain sampling, while raw query content redact/hash according to policy.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q42. Trick: parameterized LIKE means fast and secure?
+Answer:
+It helps SQL injection, performance guarantee nahi; leading wildcard scan ho sakta hai. `%` semantics also product correctness issue hai.
+
+Q43. Trick: PageRequest automatically owner-secure?
+Answer:
+Nahi. Pageable only limit/order deta hai. Query predicate/service lookup must enforce ownership.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q44. Search dialog same branch ka part hai?
+Answer:
+Nahi. 51ad3cc separate feature/search-dialog-collapsed-sidebar commit hai and multi-user-login PR ancestry se main me entered. Base search owns 9dd63af through 6e79b84.
+
+Q45. Multi-user fix relation?
+Answer:
+ba1f78a only AuthContext token storage localStorage se sessionStorage swap karta hai; search backend ownership us commit ka work nahi.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q46. Six facts?
+Answer:
+9dd63af API; 61d3916 UI; 45cef8c DB paging; 6e79b84 collapsed icon; owner-scoped LIKE; no owned automated tests.
+
+Q47. Biggest gap?
+Answer:
+Search list unbounded/LIKE scan-heavy ho sakti hai, cancellation and full search pagination absent, and one-param message paging contract ambiguous hai.
+
+Q48. Closing line?
+Answer:
+“Maine search ko owner-scoped repository queries se secure kiya, DTO/service boundary se organize kiya, aur full-fetch pagination bug ko PageRequest se database tak push kiya; scale ke liye FTS, bounded results and race-safe UI next steps hain.”
