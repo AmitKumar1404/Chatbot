@@ -1,0 +1,152 @@
+FEATURE: REQUEST–RESPONSE INPUT CONTROL — INTERVIEW PREPARATION
+Evidence: commit c1bf727, corresponding documentation, and before/after `InputBox.jsx`.
+
+PROJECT CONTEXT
+Yeh focused frontend branch sirf `InputBox.jsx` ko change karti hai. Enter without Shift ab stream ke dauran kuch send/stop nahi karta; button stream state ke basis par Send ya Stop call karta hai. Input React-controlled rehta hai. Backend, API, database, authentication, aur tests is commit ka scope nahi hain.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Controlled input kya hota hai?
+Answer: Textarea ka displayed value React state `text` se aata hai aur `onChange` wahi state update karta hai. UI aur application state ka single source of truth hota hai.
+
+Q2. Keyboard event handling me `preventDefault()` aur early return ka kya role hai?
+Answer: `preventDefault()` browser ka default action, jaise Enter par newline ya form submission, rokta hai. Early return handler ka remaining logic execute hone se rokta hai. Dono control-flow tools hain; business behavior component ki current state aur requirements par depend karta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q3. `handleKeyDown` exactly kya karta hai?
+Answer: Enter without Shift par default newline rokta hai. Streaming ho to return; warna trim, empty guard, `onSend(trimmed)`, aur `setText("")` karta hai.
+
+Follow-up: Shift+Enter?
+Answer: Condition match nahi hoti, isliye textarea normal multiline newline allow karta hai.
+
+Follow-up: Branch ka exact input-control change kya tha?
+Answer: Form-submit flow ko explicit keyboard aur button handlers me convert kiya, send/stop state separate ki, aur streaming ke time Enter ko no-op banaya.
+
+Q4. Button ka behavior kya hai?
+Answer: `type="button"` hai. Streaming me `onStop()` call hota hai; otherwise trimmed text send karke input clear hota hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q5. Streaming me Enter se stop kyun remove kiya?
+Answer: Verified before-code Enter during streaming `onStop()` karta tha; after-code keyboard event no-op hai. Isse accidental Enter press response cancel nahi karta, while explicit Stop button remains.
+
+Follow-up: Form submit kyun remove hua?
+Answer: Same button do modes handle karta hai; explicit type button and handler flow send/stop branching ko direct banata hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q6. Send lifecycle trace karo.
+Answer: User types → `onChange` state update → Enter/button trims text → empty/stream guards → parent `onSend` → local text clear. Network send parent ka concern hai.
+
+Follow-up: Stop lifecycle?
+Answer: Parent se `isStreaming=true` aata hai, button label Stop hota hai, click `onStop()` call karta hai; InputBox khud STOMP message nahi banata.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q7. `disabled` aur `isStreaming` me difference?
+Answer: `disabled` textarea/button availability control karta hai, jaise disconnected state. `isStreaming` button mode aur keyboard guard control karta hai.
+
+Follow-up: Streaming me typed text preserve hota hai?
+Answer: Textarea `disabled` sirf parent `disabled` prop par hai, `isStreaming` par nahi. User text edit kar sakta hai, but Enter send nahi karta.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q8. Input spaces-only ho to?
+Answer: `trim()` empty string deta hai; send nahi hota aur button non-streaming state me disabled hota hai.
+
+Q9. User rapid double-click kare to?
+Answer: Dono callbacks React prop update se pehle fire ho sakte hain. Branch server idempotency ya local pending lock add nahi karti; test aur immediate guard improvement hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q10. `onSend` throw ya reject kare to input ka kya hoga?
+Answer: Dono cases identical nahi hain:
+
+* Agar `onSend(trimmed)` synchronously throw kare, control flow wahi rukta hai aur uske baad ka `setText("")` execute nahi hota.
+* Agar `onSend` Promise return kare aur woh baad me reject ho, handler us Promise ko await nahi karta. Synchronous execution `setText("")` tak pahunch kar input clear kar deti hai; rejection baad me observe hoti hai.
+
+Current commit me rejected asynchronous send ke liye draft restore logic nahi hai.
+
+Follow-up: Production improvement?
+Answer: Parent callback ko result-aware banana, pending state set karna, aur failure par draft retain/restore karna.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q11. Is branch ne security badli?
+Answer: Nahi. Input guard UX validation hai, trust boundary nahi. Server-side auth aur validation inherited layers ki responsibility hain.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q12. Database section applicable hai?
+Answer: Nahi. Commit me persistence, entity, repository, migration, ya transaction change nahi hua.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q13. Kya request contract change hua?
+Answer: Nahi. Component existing parent callbacks consume karta hai; REST/STOMP payload implementation is commit me touch nahi hui.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q14. Button disabled expression explain karo.
+Answer: `disabled || (!isStreaming && !text.trim())`: global disabled state always wins; streaming me blank text ke bawajood Stop enabled rehta hai; idle me blank text Send disable karta hai.
+
+Follow-up: Accessibility concern?
+Answer: Dynamic Send/Stop label useful hai, but explicit `aria-label`, status announcement, focus behavior, aur keyboard tests evidence me nahi hain.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q15. Real-time state me main race kya hai?
+Answer: Parent `isStreaming` prop update aur rapid local clicks ke beech short window ho sakti hai. InputBox process-level stream ownership solve nahi karta.
+
+Follow-up: Enter and click same time?
+Answer: Dono same send path independently execute kar sakte hain before prop changes. Local pending ref/disabled transition duplicate intent reduce karega.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q16. Performance concern kya hai?
+Answer: Controlled textarea har keystroke par rerender karta hai, jo normal input size ke liye acceptable hai. Is branch me heavy computation ya network call component ke andar nahi hai.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q17. Actual test evidence?
+Answer: `c1bf727` me test file add ya modify nahi hui; no tests verified.
+
+Follow-up: Minimum component tests?
+Answer: Enter send, Shift+Enter newline, stream-time Enter no-op, button Stop, spaces-only guard, disabled state, rapid actions, aur failed callback draft behavior.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q18. Production-ready improvement kya hogi?
+Answer: Explicit state machine (`idle/sending/streaming/stopping/error`), pending-action guard, accessible announcements, failure-aware draft retention, aur component tests.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+OWNERSHIP / EVIDENCE SUBSECTION
+
+Q19. Is commit ko “request-response backend feature” bolna sahi hai?
+Answer: Nahi. Name broad hai, but evidence sirf `InputBox.jsx` controlled send/stop behavior dikhata hai. Backend contract inherited hai.
+
+TRICK / CROSS SUBSECTION
+
+Q20. Kya Enter streaming ke time Stop karta hai?
+Answer: Before version me karta tha; `c1bf727` after-version me Enter default prevent karke return karta hai. Stop sirf button se hota hai.
+
+Q21. Kya `handleSubmit` current code me hai?
+Answer: Active function nahi; old implementation comments me retained hai. Current send logic keyboard handler aur button inline callback me duplicated hai.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q22. Stream-stop branch se relation kya hai?
+Answer: `onStop`, `isStreaming`, aur parent stream lifecycle inherited hain. Yeh branch un controls ka input UX refine karti hai, stream cancellation backend own nahi karti.
+
+Follow-up: Later history/reconnect guarantees yahan claim karoge?
+Answer: Nahi. Session persistence, reconnect recovery, correlation, aur WebSocket stability later branches ke concerns hain.
+
+SECTION 18 — RAPID REVISION
+- Owner commit: `c1bf727`; changed file: `InputBox.jsx`.
+- Enter: idle me send; streaming me no-op; Shift+Enter newline.
+- Button: idle Send, streaming Stop.
+- Input: controlled `text`; successful callback invocation ke turant baad clear.
+- No backend, API, DB, auth, or tests.
+- Risks: duplicate rapid send, callback failure par lost draft, duplicated send logic.

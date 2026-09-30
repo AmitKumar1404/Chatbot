@@ -1,0 +1,177 @@
+INTERVIEW PREPARATION
+Branch: feature/swagger-integration
+
+PROJECT CONTEXT
+Commit `d539dee` ne Springdoc OpenAPI UI dependency `2.5.0`, exact bean `chatbotOpenApi`, API metadata, bearer-JWT scheme aur public documentation routes add kiye. Generated contract REST controllers ke liye hai, STOMP ke liye nahi.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. OpenAPI aur Swagger me difference kya hai?
+
+Answer:
+OpenAPI machine-readable HTTP API specification hai. Swagger naam commonly UI/tooling ecosystem ke liye use hota hai jo OpenAPI schema consume karta hai.
+
+Follow-up Q1.1: Kya Swagger UI khud API contract ka source hai?
+
+Answer:
+Nahi. UI generated OpenAPI document ka viewer/client hai; controller annotations/config se schema banta hai.
+
+Q2. OpenAPI schema me paths, operations aur schemas kya represent karte hain?
+
+Answer:
+Paths URLs, operations HTTP methods/behavior, aur schemas request-response data shapes represent karte hain.
+
+Q3. Security scheme aur security requirement me farq kya hai?
+
+Answer:
+Scheme authentication mechanism define karta hai; requirement batata hai ki operations par kaunsa scheme expected hai.
+
+Q4. Springdoc kya karta hai?
+
+Answer:
+Spring MVC controller mappings aur model metadata inspect karke runtime OpenAPI JSON aur Swagger UI provide karta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q5. Project ka OpenAPI bean exactly kya naam hai aur kya banata hai?
+
+Answer:
+`chatbotOpenApi`; title, description, version, `bearerAuth` HTTP bearer/JWT scheme aur global security requirement ke saath `OpenAPI` object banata hai.
+
+Follow-up Q5.1: Metadata values kahan se aati hain?
+
+Answer:
+`app.openapi.title`, `app.openapi.description` aur `app.openapi.version` properties `@Value` se inject hoti hain.
+
+Q6. Kaunsa Springdoc artifact/version add hua?
+
+Answer:
+`org.springdoc:springdoc-openapi-starter-webmvc-ui:2.5.0`.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q7. Manual README ke saath generated schema kyun useful hai?
+
+Answer:
+README architecture/setup samjhata hai; generated schema controller contract discoverable aur tools ke liye machine-readable banata hai. Dono drift kar sakte hain, isliye tests helpful hain.
+
+Q8. Docs routes public kyun ho sakte hain, aur risk kya hai?
+
+Answer:
+Developer access simple hota hai, lekin production endpoint inventory expose hoti hai. Exposure deployment policy se restrict/disable ki ja sakti hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q9. Application start par OpenAPI kaise assemble hota hai?
+
+Answer:
+Spring `chatbotOpenApi` bean create karta hai, Springdoc MVC endpoints scan karta hai, custom metadata/components merge karta hai, phir JSON/UI routes serve karta hai.
+
+Q10. Bearer JWT metadata request ko authenticate karta hai?
+
+Answer:
+Nahi. UI ko Authorization header model milta hai; actual token validation Spring Security/JWT filter karta hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q11. Global bearer requirement ka subtle drawback kya hai?
+
+Answer:
+Public endpoints bhi secured dikh sakte hain unless operation-level metadata override ho. Schema semantics ko actual security rules ke against test karna chahiye.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q12. Agar `app.openapi.title` missing ho to kya risk hai?
+
+Answer:
+`@Value` placeholder resolve na ho to bean/application context startup fail ho sakta hai. Config binding/startup test isko early pakad sakta hai.
+
+Q13. Context path bhoolne par docs URL kya hoga?
+
+Answer:
+Internal matcher `/v3/api-docs/**` hai, but external project URL context prefix ke saath commonly `/api/v1/v3/api-docs` aur UI `/api/v1/swagger-ui/index.html` hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q14. Swagger UI 404 aaye to debugging order kya hoga?
+
+Answer:
+Context path, Springdoc dependency, generated JSON route, security matcher aur reverse-proxy path rewrite check karunga.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q15. Is branch ne kaunse docs routes public kiye?
+
+Answer:
+`/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`. Business API authorization rules change nahi hue.
+
+Q16. Production me Swagger UI kaise harden karoge?
+
+Answer:
+Profile/property se disable ya internal network/auth behind expose; schema me secrets/examples avoid; access logs aur version policy maintain.
+
+SECTION 9 — DATABASE QUESTIONS
+
+N/A — OpenAPI integration ne database schema ya persistence layer touch nahi ki.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q17. Kya OpenAPI STOMP destinations describe karta hai?
+
+Answer:
+Is implementation me nahi. OpenAPI HTTP/REST focused hai; STOMP frames, destinations aur event payload lifecycle ko separate AsyncAPI/manual docs chahiye.
+
+Q18. Contract drift ka automated signal kaise milega?
+
+Answer:
+Integration test se `/v3/api-docs` fetch karke critical paths/security assert karo aur approved spec snapshot/semantic diff CI me compare karo.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+N/A — product React frontend unchanged tha; served Swagger UI dependency-provided tooling UI hai.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+N/A — branch ne WebSocket/STOMP ya request concurrency implementation modify nahi ki.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q19. OpenAPI generation ka performance concern kya hai?
+
+Answer:
+Business hot path nahi, but large schema/UI startup/request cost badha sakta hai. Cache/restrict tabhi optimize karunga jab measurement issue dikhaye.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q20. Minimum useful tests kaunse honge?
+
+Answer:
+Context loads with `chatbotOpenApi`, dependency version resolution, docs routes 200/public, bearer scheme present, critical REST paths present, business route still protected.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q21. Spec ko production artifact kaise manage karoge?
+
+Answer:
+Versioned schema publish, breaking-change review, generated client/collection pipeline aur environment-specific server URLs; STOMP contract separately versioned.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q22. “Swagger ne APIs secure kar di” kyun wrong hai?
+
+Answer:
+Swagger metadata documentation hai. SecurityConfig/JwtFilter authorization enforce karte hain; UI ka Authorize button security control nahi.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q23. Postman collection branch ke saath overlap kya hai?
+
+Answer:
+Dono REST discoverability/tooling improve karte hain. OpenAPI future me Postman generation drive kar sakta hai, but `d539dee` ne generation pipeline add nahi ki.
+
+SECTION 18 — RAPID REVISION
+
+Q24. Rapid recall?
+
+Answer:
+Springdoc 2.5.0; bean `chatbotOpenApi`; bearer JWT metadata; docs routes public; REST only; no OpenAPI contract test.

@@ -1,0 +1,266 @@
+INTERVIEW PREPARATION
+Branch: feature/pinned-chats
+
+PROJECT CONTEXT
+Commit `d0c21df` adds owner-scoped pin/unpin persistence, effective PATCH `/api/v1/chat/sessions/{id}/pin`, V6 `is_pinned BOOLEAN NOT NULL DEFAULT FALSE`, and client-side pinned/unpinned grouping. No tests or optimistic locking were added.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. HTTP PATCH kab use hota hai?
+
+Answer:
+Existing resource ka partial state update. Client only changed field bhejta hai, full representation replace nahi karta.
+
+Q2. Idempotent operation ka meaning kya hai?
+
+Answer:
+Same request repeat karne se final server state same rahe. `{pinned:true}` target-state PATCH effect me idempotent hai, “toggle” command nahi.
+
+Follow-up Q2.1: Client phir `!chat.pinned` kyun calculate karta hai?
+
+Answer:
+UI current state se desired target nikalta hai, but network payload explicit final boolean bhejta hai; server blind toggle nahi karta.
+
+Q3. JPA dirty checking kya hai?
+
+Answer:
+Managed entity field transaction me change ho to persistence context flush par SQL update generate kar sakta hai; explicit save project code me still used hai.
+
+Q4. Boolean DB column me `NOT NULL DEFAULT FALSE` kyun useful hai?
+
+Answer:
+Existing/new rows deterministic unpinned state paate hain; application ko null third-state handle nahi karna.
+
+Q5. Authorization me owner-scoped lookup kya hai?
+
+Answer:
+Resource ID ke saath current user ID query me include karna, so foreign tenant row load/mutate hi na ho.
+
+Follow-up Q5.1: Sirf JWT valid hona enough hai?
+
+Answer:
+Nahi. JWT user identify karta hai; resource-level owner check decide karta hai ki requested session us user ki hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q6. Exact API kya hai?
+
+Answer:
+PATCH `/api/v1/chat/sessions/{sessionId}/pin`, body `{ "pinned": true|false }`, success returns `ChatSession`.
+
+Q7. Backend service flow kya hai?
+
+Answer:
+Current user resolve → `findByIdAndUser_Id` → not found exception → `setPinned` → transactional save.
+
+Q8. V6 exact migration kya karti hai?
+
+Answer:
+`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE`.
+
+Q9. Frontend grouping kaise hoti hai?
+
+Answer:
+Server field Boolean me map, `chats.filter` se pinned and unpinned arrays, then Pinned group first and Chats group after.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q10. PATCH PUT se better kyun hai?
+
+Answer:
+Only one property update hai; PUT usually complete resource replacement semantics imply karta hai.
+
+Q11. Server ko `togglePin(id)` kyun nahi diya?
+
+Answer:
+Explicit target state retries ko deterministic banata hai. Toggle request duplicate ho to original state wapas flip ho sakti hai.
+
+Q12. Pin-first SQL ordering kyun nahi ki gayi?
+
+Answer:
+Implementation client partition use karti hai, simple existing list reuse. Trade-off: large/paginated histories me global ordering inconsistent ho sakti hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q13. Click se persisted UI tak complete flow?
+
+Answer:
+Menu click target boolean computes → authenticated chatApi PATCH → controller/service owner-check/save → response → matching React state row replace → derived groups rerender.
+
+Q14. Existing sessions migration ke baad kya value paate hain?
+
+Answer:
+DEFAULT FALSE + NOT NULL means existing rows unpinned backfill/state receive karte hain.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q15. Draft chat pin action se kyun excluded hai?
+
+Answer:
+`draft-` IDs persisted server sessions nahi; PATCH ke liye real numeric session ID chahiye.
+
+Q16. Response DTO ke bajay entity return karne ka concern?
+
+Answer:
+Persistence fields API contract me leak/couple ho sakte hain. Dedicated response DTO safer evolution boundary hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q17. Request body me `pinned` missing ho to?
+
+Answer:
+DTO primitive `boolean` default false ho sakta hai; `@Valid` missing field ko reject nahi karega. Wrapper `Boolean` + `@NotNull` better.
+
+Q18. Session click ke baad delete ho chuki ho to?
+
+Answer:
+Owner-scoped lookup empty and request fails. UI currently console error karta hai; refetch/toast improvement hai.
+
+Q19. Two tabs opposite pin states bheje to?
+
+Answer:
+No `@Version`/lock; last committed write wins and one tab stale reh sakta hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q20. Frontend failed PATCH ko kaise handle karta hai?
+
+Answer:
+`chatApi` non-OK par Error throw karta hai; `handleTogglePinned` catches and `console.error` only. Since state success ke baad update hota hai, false optimistic rollback needed nahi, but user feedback absent hai.
+
+Q21. DB save fail ho to?
+
+Answer:
+Transactional service update rollback; API error reaches client. Dedicated status/error mapping exact handler snapshot se verify karni hogi.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q22. Cross-user pin mutation kaise blocked hai?
+
+Answer:
+JWT-protected chat route plus `findByIdAndUser_Id(sessionId,currentUser.id)`; ID-only fetch nahi.
+
+Q23. Not-found vs forbidden response trade-off?
+
+Answer:
+Owner-scoped `findByIdAndUser_Id` missing session aur foreign-owned session dono ke liye no match deta hai, phir service `RuntimeException(SESSION_NOT_FOUND)` throw karti hai. Current global runtime-exception mapping dono cases ko HTTP 400 banati hai; dedicated 404 aur 403 statuses nahi milte. Same outward result foreign resource existence hide karta hai, lekin HTTP semantics coarse hain.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q24. V6 me `IF NOT EXISTS` ka benefit/risk?
+
+Answer:
+Repeat/partially prepared schema tolerant ho sakta hai; wrong pre-existing column definition silently acceptable lag sakti hai, so validation still needed.
+
+Q25. Pin column par index chahiye?
+
+Answer:
+Current client-side grouping and user history query ke liye branch ne none add kiya. Server-side `WHERE/ORDER BY is_pinned` at scale measurement/query plan ke baad composite index consider.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q26. PATCH response 200 vs 204?
+
+Answer:
+200 appropriate if updated representation returned; 204 if no body. Project returns `ChatSession`, so 200 coherent hai.
+
+Q27. Request replay safe hai?
+
+Answer:
+Same `{pinned:true}` repeated final state true rakhta hai; audit/version side effects absent evidence me effect idempotent hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q28. State update immutable kaise hai?
+
+Answer:
+`setChats(prev => prev.map(...))` matching chat ko spread copy with response boolean deta hai.
+
+Q29. Group ordering within pinned chats kya hai?
+
+Answer:
+Original `chats` array order preserve hota hai; only partition changes. Backend pin timestamp/order field nahi.
+
+Q30. Unused `PinOff` import ka kya significance?
+
+Answer:
+Code cleanliness issue only; menu renders `Pin` icon with text changing between Pin/Unpin.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q31. Last-write-wins kab acceptable hai?
+
+Answer:
+Low-stakes preference boolean me often acceptable, but multi-tab confusion possible. Strong conflict detection needed ho to version/ETag.
+
+Q32. Optimistic locking kaise add karoge?
+
+Answer:
+Entity `@Version` or HTTP ETag/If-Match; stale update conflict response then client refetch.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q33. Client grouping complexity?
+
+Answer:
+Two filters each O(n). Normal sidebar size me simple; very large list needs pagination/server ordering instead of premature memoization.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q34. Backend test matrix?
+
+Answer:
+Authenticated true/false, missing field, foreign owner, absent session, DB persistence, repeated same target and concurrent opposite writes.
+
+Q35. Frontend tests?
+
+Answer:
+Server mapping, pinned headings/order, draft exclusion, successful move, failed request no state corruption and accessible menu action.
+
+Q36. Migration test?
+
+Answer:
+Existing rows become false/non-null; fresh schema V1→V6 validates JPA mapping.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q37. Safe rollout order?
+
+Answer:
+Additive V6/backend first so response field exists, then frontend. Default false preserves old behavior; monitor PATCH errors.
+
+Q38. Feature scale design?
+
+Answer:
+Server pagination with deterministic pinned ordering, pin timestamp/rank if product needs it, DTO/versioning and observability.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q39. “Pinned chats SQL me top sorted hain” kyun wrong?
+
+Answer:
+No DB ordering change/index in commit; frontend partitions returned array.
+
+Q40. Primitive boolean validation trap kya hai?
+
+Answer:
+Missing JSON field becomes false rather than validation error, potentially unpinning unintentionally.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q41. Migration number and ownership?
+
+Answer:
+V6 belongs to `d0c21df`; earlier V3 refresh and intervening migrations separate branches.
+
+Q42. UI overflow fix se koi implementation overlap?
+
+Answer:
+No. `b51bfb6` bubble CSS; pinned branch sidebar/API/persistence changes.
+
+SECTION 18 — RAPID REVISION
+
+Q43. Rapid recall?
+
+Answer:
+PATCH target boolean; owner-scoped service; V6 default false; client partition; drafts excluded; no tests; last-write-wins.

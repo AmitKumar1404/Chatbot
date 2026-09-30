@@ -1,0 +1,587 @@
+INTERVIEW PREPARATION
+Branch: main
+
+PROJECT CONTEXT
+===============
+Repository baseline: main @ a62003a, integrated through PR #36.
+Product: Authenticated persistent chatbot with React UI, Spring Boot REST/STOMP backend, PostgreSQL/Flyway, Ollama streaming, reconnect/STOP, search/history/pins/feedback, Redis-backed infrastructure metadata, PDF RAG and browser voice input.
+Stack evidence: Java 17, Spring Boot 3.3.5, React 19, JPA, PostgreSQL, Flyway V1-V12, JWT/BCrypt, STOMP simple broker, Redis, Bucket4j, PDFBox, Ollama, SMTP, OpenAPI/Actuator, CI.
+Critical branch distinction:
+- Feedback main includes 9d27224..1c3e913; 4185ea6 is unmerged tip.
+- Document main includes 7243ca7..14b38eb; 75fed10 is unmerged tip.
+- Main has related non-equivalent mode repair 920edf5 and voice 5df9a34.
+Test evidence: Current main has only ChatbotApplicationTests.contextLoads(); frontend tests and feature behavior tests absent.
+Evidence rule: Code/migrations/commit ancestry wins over stale README. Exact historical motives, production scale/SLA and unimplemented guarantees are not asserted.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q1. Project ko 60 seconds me explain karo.
+Answer: React client JWT-authenticated REST aur STOMP use karta hai. Chat messages PostgreSQL me persist hote hain; Ollama response Flux se private user destination par chunk/done/error events stream hoti hai. Active-stream metadata Redis with local fallback me, actual Disposable process-local hai. Search/history/pin/feedback REST features hain. DOCUMENT mode PDF chunks/embeddings se RAG prompt banata; voice browser transcript ko same text flow me bhejta.
+
+Follow-up Q1.1. Monolith hai?
+Answer: Deployable Spring backend + React frontend modular monolith style hai, external PostgreSQL/Redis/Ollama/SMTP dependencies ke saath.
+
+Q2. REST aur WebSocket dono kyun?
+Answer: CRUD/auth/history/search/upload REST ke request-response semantics fit; token streaming/STOP/reconnect STOMP events fit.
+
+Q3. Main data entities?
+Answer: User, ChatSession, Message, RefreshToken, PasswordResetToken, MessageFeedback, Document, DocumentChunk, DocumentChunkEmbedding.
+
+Q4. Core quality attributes?
+Answer: Ownership isolation, persistent history, cancellable low-latency streaming, reconnect recovery, bounded RAG context, graceful Redis fallback. Comprehensive production proof/tests absent.
+
+Q5. Current main ka biggest strength?
+Answer: Features vertical slices me UI→contract→service→DB integrated hain, especially streaming correlation and ownership checks.
+
+Q6. Biggest weakness?
+Answer: Automated behavioral coverage almost absent; several multi-resource/concurrency/security gaps source inspection se visible hain.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q7. ChatWebSocketController.handleChat flow?
+Answer:
+1. Principal/payload validate.
+2. NEW/EDIT/session/message IDs aur chat mode resolve.
+3. Duplicate clientStreamId guard.
+4. DOCUMENT mode me owned document verify aur RAG prompt build.
+5. ChatService short transaction me user/assistant placeholder create/update.
+6. ActiveStreamRegistry old stream replace karke Ollama Flux subscribe.
+7. Chunks private destination par correlated envelope me send aur partial DB update.
+8. Completion final persist + done event + conditional registry removal.
+9. Error partial state/error event + cleanup.
+
+Q8. StreamDownstreamEvent kyun?
+Answer: Yeh `chunk`, `done`, aur `error` frames ko typed envelope deta hai. `type` event kind batata hai aur normal correlated events me `clientStreamId` stream identify karta hai. Baaki fields event-dependent/optional hain:
+
+* `assistantMessageId` chunk/error aur many DONE flows me bubble route karta hai, lekin har frame me guaranteed nahi.
+* `chunk` sirf chunk event ke text ke liye hai.
+* `message` error event ke liye hai.
+* `chatSessionId` `sendJsonToUser` ke terminal/session-sync paths me set ho sakta hai; ordinary chunks me present nahi hota.
+
+STOP ka DONE event current handler me sirf `clientStreamId` ke saath ban sakta hai, isliye optional fields ko universal nahi kehna chahiye.
+
+Q9. ChatServiceImpl role?
+Answer: Owner-scoped session CRUD/history, synchronous chat path, stream begin/partial/final persistence, edit target resolution, feedback-enriched message DTO aur title refresh.
+
+Q10. ActiveStreamRegistry role?
+Answer: Per-principal local Disposable manage, atomic compute se replace/cancel, Redis metadata mirror/read, duplicate client stream detect, disconnect markers aur stale callback matching.
+
+Q11. RedisInfraStateStore role?
+Answer: Active stream JSON TTL keys, disconnected-user sorted set aur rate-limit counter helper manage karta hai. Active-stream aur disconnected-marker operations ke liye per-instance `ConcurrentMap` fallback hai. Rate-limit counter ka in-memory map fallback nahi hai; Redis unavailable ho to helper `1` return karta hai.
+
+Q12. Frontend ChatApp role?
+Answer: Sessions/messages, STOMP lifecycle, client stream correlation, recovery, edit/stop, search navigation, pin, feedback, documents/mode aur voice-adjacent orchestration.
+
+Q13. Auth architecture?
+Answer: Register/login/refresh/forgot/reset REST; BCrypt passwords; access JWT REST filter; STOMP CONNECT interceptor; stateless SecurityFilterChain; tab-scoped sessionStorage frontend.
+
+Q14. RAG architecture?
+Answer: Sync upload→PDFBox→chunk→Ollama embeddings→JSONB; query embedding→all document vectors→Java cosine+BM25→bounded context→grounded prompt→normal stream.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q15. STOMP simple broker kyun?
+Answer: Spring-native setup aur per-user destinations simple. Multi-node durable messaging/replay ke liye external broker needed; current simple broker process-local.
+
+Q16. Partial response persist kyun?
+Answer: Reconnect/history me generated content recover ho sake. Frequent writes load badhate; throttling/coalescing trade-off.
+
+Q17. clientStreamId aur server streamId dono kyun?
+Answer: Client ID UI/retry correlation, server ID active execution identity/stale callback guard. One ID reuse trust/race boundaries mix karta.
+
+Q18. Short transactions streaming me kyun?
+Answer: Long Ollama stream ke across DB transaction/connection hold avoid hota. Trade-off intermediate incomplete state explicitly manage karna.
+
+Q19. Redis fallback kyun?
+Answer: Redis outage me single-instance functionality degrade gracefully. Multi-instance consistency fallback me break ho sakti; availability vs consistency trade-off.
+
+Q20. JWT stateless kyun?
+Answer: REST scaling/simple auth. Immediate access-token revocation difficult; refresh token DB rotation separate control hai.
+
+Q21. sessionStorage over localStorage kyun?
+Answer: fix/multi-user-login ne tabs ko independent login identity di. Refresh/restart persistence lower; both JS-readable and XSS-exposed.
+
+Q22. Refresh token hash kyun?
+Answer: DB leak me raw long-lived bearer token expose na ho. Rotation replay window still concurrency controls maangti.
+
+Q23. Flyway kyun?
+Answer: V1-V12 deterministic schema evolution/deployment reproducibility. Entity auto-ddl production migration substitute nahi.
+
+Q24. Optimistic feedback/pin UI kyun?
+Answer: Perceived latency low. Rollback/order handling required; feedback has rollback, all flows equal guarantees nahi.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q25. Login flow?
+Answer:
+1. POST auth/login public.
+2. AuthenticationManager credentials verify.
+3. Access token and refresh token issue.
+4. Refresh token hash DB me.
+5. Client tab sessionStorage auth state.
+6. REST Authorization bearer; STOMP CONNECT bearer headers.
+
+Q26. STOMP authentication?
+Answer: Handshake endpoint permitted, but StompJwtChannelInterceptor CONNECT bearer validate karke Principal set karta; protected app destinations principal require karte.
+
+Q27. New message flow?
+Answer: UI client IDs/payload publish → backend owner/session resolve → user+incomplete assistant row → Ollama stream → chunk events + partial updates → final complete row + done.
+
+Q28. STOP flow?
+Answer: Client STOP payload → registry active metadata/local Disposable remove/dispose → matching clientStreamId done envelope; race-safe removeIfMatches old callback ko new stream remove karne se rokta.
+
+Q29. Reconnect recovery?
+Answer: Disconnect marker grace period rakhta; reconnect clear marker and active-status REST se clientStreamId/session/assistant ID recover; client DB history + stream events reconcile karta.
+
+Q30. Search flow?
+Answer: Authenticated query owner-scoped session titles aur message content search karti hai aur unpaged `List<SearchResultDto>` return hoti hai. Frontend dialog/list results render karke target session navigation aur later highlight flow handle karta hai.
+
+Q31. Pin flow?
+Answer: is_pinned V6 session metadata; owner-scoped update endpoint/UI ordering.
+
+Q32. Feedback flow?
+Answer: Optimistic buttons/modal → PUT owner/completion checked transactional read-then-upsert → V7 unique pair → history batch enrichment. Main reason restore strictness tip-only.
+
+Q33. Document upload flow?
+Answer: Effective POST /api/v1/api/documents/upload → validate/hash/copy/extract/chunk/embed/multi-save → 201; non-atomic synchronous.
+
+Q34. Voice flow?
+Answer: Browser final speech transcript textarea me; user edit/send; no backend audio API; ordinary STOMP text.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q35. User destinations secure kaise?
+Answer: Authenticated STOMP principal and convertAndSendToUser isolate logical delivery. Broker/session configuration integration test absent.
+
+Q36. Old stream callback new stream ko corrupt kar sakta?
+Answer: isCurrentStream/removeIfMatches and clientStreamId correlation risk bound karte. DB partial-write ordering full formal guarantee evidence nahi.
+
+Q37. Redis me Disposable stored hai?
+Answer: Nahi. Sirf serializable metadata. Reactor Disposable local ConcurrentMap me.
+
+Q38. Remote node STOP possible?
+Answer: Metadata remove ho sakti, but other node ka local Disposable directly dispose nahi hota. Cross-node cancel channel/lease absent.
+
+Q39. Refresh frontend use karta hai?
+Answer: Backend refresh exists; docs evidence ke mutabik frontend refresh caller absent. Access expiry UX may logout/fail.
+
+Q40. Access token password reset par revoke?
+Answer: Existing refresh tokens revoke hote; JWT deny-list evidence absent, so current access token expiry tak window.
+
+Q41. Search ranking?
+Answer: Relational contains-style owner-scoped search hai. Title results pehle aur message results baad me append hote hain; global ranking, deduplication, aur search-result pagination evidence N/A.
+
+Q42. History feedback reason main me?
+Answer: Nahi; feedback type restore. 4185ea6 unmerged tip reason restore/strict validation.
+
+Q43. Normal chat stale documentId?
+Answer: Main 920edf5 explicit mode repair intends NORMAL ignore; 75fed10 tests unmerged.
+
+Q44. Voice audio local-only?
+Answer: App backend ko nahi; browser vendor cloud possible.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q45. Redis down?
+Answer: Store logs warning once-ish and local maps fallback. Single node continues; multi-node metadata divergence possible.
+
+Q46. Ollama down mid-stream?
+Answer: `ChatWebSocketController.doOnError` pehle `isTransientStreamingFailure(e)` check karta hai.
+
+* Connection refused, timeout, premature close jaise transient failures par controller error event, DONE event, aur `persistOnce()` emit/call nahi karta. `doFinally` active stream metadata cleanup karta hai; pehle se throttled partial DB state ho sakti hai.
+* Non-transient failure par error text accumulator me append hota hai, persistence run hoti hai, phir correlated ERROR aur DONE events bheje jate hain.
+
+Automatic retry/circuit breaker ka evidence nahi hai.
+
+Q47. DB down mid-stream?
+Answer: Partial/final persistence fail; client may have chunks not durable. Transaction only individual DB operation cover karta.
+
+Q48. Browser disconnect briefly?
+Answer: Grace marker avoids immediate cancel; reconnect recovery status/history reconcile. Grace expiry cleanup cancels local stream when execution owner reachable.
+
+Q49. Two tabs same user?
+Answer: Auth can be tab-specific users via sessionStorage, but same principal active registry keyed username means one active stream can replace another; client IDs reduce UI confusion, not independent per-tab streams.
+
+Q50. Duplicate chat publish?
+Answer: Same clientStreamId active ho to duplicate guard. After completion/retry durable idempotency key uniqueness evidence N/A.
+
+Q51. Concurrent refresh?
+Answer: Explicit row lock/conditional revoke evidence absent; both may observe valid token. Atomic consume/token family replay detection improvement.
+
+Q52. Search result deleted before click?
+Answer: Navigation/history fetch can fail/miss; frontend should stale result handle. Dedicated test absent.
+
+Q53. Concurrent feedback first insert?
+Answer: V7 unique prevents duplicate, one request constraint fail possible.
+
+Q54. Same PDF concurrent upload?
+Answer: Global V12 unique final guard, but orphan file/partial work possible.
+
+Q55. RAG prompt injection?
+Answer: Delimiter/instruction reduces risk, not guarantee. Document untrusted input.
+
+Q56. Speech API unsupported?
+Answer: Mic disabled; typing works.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q57. GlobalExceptionHandler mappings?
+Answer: BadCredentials→401, UsernameNotFound→404, RuntimeException→400, generic→500. Domain precision coarse; tip-only feedback unreadable handler main me absent.
+
+Q58. REST vs STOMP errors?
+Answer: REST status/ErrorResponse; stream path correlated error event. Client must stop pending state on terminal event.
+
+Q59. Transient streaming failures?
+Answer: StreamConstants classifier/reconnect UI handles selected cases; exact automatic retry semantics should not be overstated.
+
+Q60. Partial data compensation?
+Answer: DB transactions rollback DB scope only. Filesystem, email, Ollama/browser side effects need explicit compensation; document upload lacks it.
+
+Q61. Rate limit rejection?
+Answer: Bucket4j IP filter login/chat routes configuration based. Distributed consistency uncertain because filter buckets may process-local; Redis counter helper structure is not proof of wired distributed limiting.
+
+Q62. Password reset email fail?
+Answer: `MailServiceImpl.sendPasswordResetEmail` `mailSender.send(...)` ke around every `Exception` catch karke sirf error log karta hai; exception caller ko rethrow nahi hoti. Isliye `requestReset()` generic success return kar sakta hai aur reset token transaction commit ho sakta hai even when email delivery fail hui. Retry ya outbox implement nahi hai.
+
+Production improvement:
+Durable outbox/job, retry policy, delivery metrics, aur user-enumeration-safe response retain karke operational failure track karo.
+
+Q63. Better error model?
+Answer: Domain exceptions with stable codes: 400 validation, 401 unauth, 403 ownership, 404 missing, 409 state/conflict, 429 limit, 503 dependencies.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q64. Security layers?
+Answer: BCrypt, JWT validation, stateless filter chain, STOMP CONNECT auth, owner-scoped repositories/services, CORS, CSRF disabled for bearer model, rate filter, env secrets.
+
+Q65. CSRF disabled safe?
+Answer: Bearer header tokens generally not ambient cookies, so CSRF risk reduced. If auth cookies added, design reassess. XSS remains because token JS-readable.
+
+Q66. CORS vs WebSocket origins?
+Answer: Both require explicit production allowlists. Repository config inspect environment; broad origin should not be assumed safe.
+
+Q67. Actuator exposure?
+Answer: SecurityConfig permits /actuator/**. Production exposure/management network config crucial; unrestricted sensitive endpoints risk.
+
+Q68. Swagger exposure?
+Answer: API docs/UI permitted. Production can expose attack surface/contracts; profile-gate or intentional policy.
+
+Q69. Analytics RBAC?
+Answer: Feedback analytics path says admin but role guard absent—authenticated-user exposure.
+
+Q70. Diagnostic RAG endpoint?
+Answer: /api/v1/test-search authenticated but no document ownership check.
+
+Q71. Token storage risk?
+Answer: sessionStorage XSS-readable. CSP, output sanitization, dependency hygiene; HttpOnly cookie alternative needs CSRF/STOMP redesign.
+
+Q72. Client IP rate limit caveat?
+Answer: Proxy headers trusted incorrectly ho to spoofing; trusted-proxy configuration required. Bucket state multi-instance concern.
+
+Q73. Secrets?
+Answer: Hardening moved sensitive values to env examples/config. Secret values intentionally not included; secret manager/rotation production improvement.
+
+Q74. RAG data privacy?
+Answer: Local filesystem, DB chunks/vectors and optional content previews. Access controls, encryption, retention and logs need policy.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q75. V1-V12 summary?
+Answer: V1 core users/sessions/messages; V2 model name; V3 refresh tokens; V4 email; V5 reset tokens; V6 pinned; V7 feedback; V8 feedback reason; V9 documents; V10 chunks; V11 JSONB embeddings; V12 file hash.
+
+Q76. Important constraints?
+Answer: User identity/email uniqueness as migrations define; feedback unique(message,user)+type CHECK; chunk embedding unique chunk; document hash unique non-null; cascade chains feature-specific.
+
+Q77. Streaming persistence invariant?
+Answer: Assistant placeholder incomplete during generation, partial updates, completion flag final. Feedback requires complete.
+
+Q78. Transaction strategy?
+Answer: Standard CRUD transactions; streaming uses TransactionTemplate/short operations. No transaction across Flux lifetime.
+
+Q79. Optimistic locking?
+Answer: @Version evidence not highlighted; concurrent edits/partial writes last-write behavior risk. Add version/conditional updates where needed.
+
+Q80. JSONB vector limitation?
+Answer: No DB nearest-neighbor index; deserialize/score Java.
+
+Q81. V12 deployment hazard?
+Answer: Legacy documents with NULL hash migration abort karte hain. Operator ko rerun se pehle either real file bytes se valid hash backfill karna hoga ya explicitly supported cleanup path se legacy NULL-hash rows delete karni hongi. Migration fake hash invent nahi karti.
+
+Q82. Cascade nuance?
+Answer: Feedback message/user cascade; document→chunks→embeddings cascade; uploader user FK no cascade can block deletion.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q83. Context path?
+Answer: /api/v1. Controller paths sometimes already contain /api, creating effective double prefix for document upload and feedback analytics.
+
+Q84. Core auth endpoints?
+Answer: Register, login, refresh, forgot/reset password, me under auth base. Exact paths AppConstants/controller; public POST subset SecurityConfig me.
+
+Q85. Core chat endpoints?
+Answer: Session list/create/delete/title/pin, messages, active-stream status; sync chat path also exists alongside STOMP.
+
+Q86. Search endpoint?
+Answer: `GET /api/v1/search?q=...` authenticated owner-scoped search hai aur plain unpaged `List<SearchResultDto>` return karta hai.
+
+Q87. Feedback endpoint?
+Answer: PUT /api/v1/chat/messages/{id}/feedback.
+
+Q88. Document upload endpoint?
+Answer: Effective POST /api/v1/api/documents/upload.
+
+Q89. Analytics endpoint?
+Answer: Effective GET /api/v1/api/v1/admin/feedback/stats and no admin RBAC.
+
+Q90. API consistency improvements?
+Answer: One versioning layer, typed errors, OpenAPI contract tests, consistent DTOs/status codes, remove/profile-gate diagnostics.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q91. Frontend architecture?
+Answer: AuthContext routing/auth; ChatApp orchestration; focused components InputBox, ChatWindow, SearchBar, mode toggle, feedback; websocket helper; network/sidebar hooks.
+
+Q92. Streaming stale UI guard?
+Answer: clientStreamId/message IDs events correlate; old callbacks ignored based on active refs/state.
+
+Q93. Markdown rendering security?
+Answer: Live `ChatWindow` path `ReactMarkdown` with `remark-gfm` use karta hai; React raw HTML ko default render nahi karta unless rehype/raw behavior separately enabled ho. `StreamingMessageRenderer` file exists but current live path usse import nahi karta, isliye uski sanitizer logic ko active security boundary nahi kehna chahiye. Link-scheme behavior and XSS regression tests still verify karne chahiye.
+
+Q94. Responsive sidebar?
+Answer: useSidebarState mobile/desktop behavior, collapsed search access and overflow fixes evolved across branches.
+
+Q95. Search highlighting?
+Answer: Regex escaping and rendered parts used; unsafe raw query injection avoided by escape helper. Unicode/large-query tests needed.
+
+Q96. Auth storage?
+Answer: sessionStorage supports independent tabs, unlike prior localStorage.
+
+Q97. Voice accessibility?
+Answer: Mic labels/pressed/live error and typed fallback. Browser privacy/support caveats.
+
+Q98. Frontend testing state?
+Answer: No test suite evidence. High risk given orchestration complexity.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q99. replaceAndStart race fix?
+Answer: ConcurrentHashMap.compute same per-principal critical section me old dispose + new subscribe/store karta, previous Disposable.Swap timing issue avoid.
+
+Q100. removeIfMatches why?
+Answer: Old stream terminal callback only same server streamId active ho to remove kare; replacement stream accidentally clear na ho.
+
+Q101. Redis compare-delete atomic hai?
+Answer: Current get-then-removeActiveStreamIfMatches atomic Lua/CAS nahi. Cross-node race possible.
+
+Q102. Disconnect ZSET?
+Answer: Principal with timestamp score; grace cutoff range lookup; TTL whole ZSET key par refresh semantics nuanced. Local fallback separate.
+
+Q103. Exactly-once streaming?
+Answer: Nahi. Correlation/dedup guards hain, durable broker/event log nahi. At-least/at-most semantics formally guaranteed nahi.
+
+Q104. Multi-instance limitations?
+Answer: Simple broker and Disposable local; Redis metadata shared. Need broker relay, execution lease/owner routing, cancel pub/sub, atomic Redis scripts.
+
+Q105. Backpressure?
+Answer: Reactor stream handles async flow, but UI/STOMP/database partial update rate bounds inspect/tune needed. Explicit end-to-end backpressure guarantee N/A.
+
+Q106. Per-user one-stream policy?
+Answer: Registry username key enforces/replaces one active stream per principal per effective metadata view. Same user tabs compete.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q107. Main bottlenecks?
+Answer: Ollama latency, per-chunk STOMP/UI rendering, partial DB writes, contains search, sync PDF embeddings, Java all-vector RAG scoring.
+
+Q108. Streaming DB optimization?
+Answer: Throttle partial persistence by time/size, final mandatory write, batch/coalesce while preserving recoverability.
+
+Q109. Search scale?
+Answer: Current owner-scoped contains search unpaged hai. Scale ke liye DB full-text/trigram indexes, bounded or cursor-paginated search results, ranking, aur snippets add karne honge.
+
+Q110. RAG scale?
+Answer: Async ingestion, batch embeddings, object storage, pgvector/vector service, top-N candidate rerank.
+
+Q111. Redis scale?
+Answer: TTL keys/ZSET useful, but atomic scripts, key cardinality metrics and outage behavior load-test.
+
+Q112. Frontend render?
+Answer: Memoized bubbles/stream renderer help; long histories need virtualization/pagination and controlled markdown recomputation.
+
+Q113. Rate limiting multi-node?
+Answer: Process-local Bucket4j buckets don't provide global quota; Redis-backed atomic limiter/gateway required if global.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q114. Current test truth?
+Answer: Only contextLoads evidence on main; some CI history skipped/adjusted context. No claim of comprehensive tests.
+
+Q115. Minimum backend pyramid?
+Answer: Pure unit for token/chunk/ranking; repository migration integration with PostgreSQL/Redis; MockMvc auth/ownership; STOMP integration; Ollama/SMTP fault stubs.
+
+Q116. Streaming must-test?
+Answer: chunk ordering, done/error terminality, STOP race, replacement callback, reconnect grace, duplicate client ID, two tabs, Redis outage, DB partial failure.
+
+Q117. Security must-test?
+Answer: REST/STOMP unauth, cross-user session/message/document, admin analytics, test-search ownership, refresh replay, CORS/origins, rate limits.
+
+Q118. Migration tests?
+Answer: Empty and legacy snapshots through V12, constraints/cascades, V12 null precondition/backfill procedure.
+
+Q119. Frontend tests?
+Answer: Auth expiry, reconnect reconciliation, optimistic rollback, search navigation, edit positioning, mode stale ID, voice callbacks, responsive/accessibility.
+
+Q120. RAG tests?
+Answer: Upload bounds/partial failure, ranking determinism/quality, prompt fallback/injection, NORMAL no retrieval, DOCUMENT ownership E2E.
+
+Q121. Tip tests port?
+Answer: Adapt 75fed10 ChatMode/prompt tests and add 4185ea6 validation/history tests only after desired main contract chosen.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q122. Production topology?
+Answer: CDN/static frontend, API/STOMP backend replicas, PostgreSQL HA, Redis HA, external STOMP broker, Ollama/model service, object storage, queue workers, SMTP provider, observability.
+
+Q123. Stream ownership design?
+Answer: Redis lease principal→instance/stream with atomic acquire/renew/release; broker routes cancel/events; durable state supports recovery; fencing token rejects stale writers.
+
+Q124. RAG ingestion design?
+Answer: Object upload, job state/outbox, worker extraction/chunk/embed bulk write, READY atomically, retries/DLQ/cleanup, tenant quotas/scanning.
+
+Q125. Auth hardening?
+Answer: Short access TTL, atomic refresh rotation/token families/replay detection, HttpOnly strategy evaluation, MFA, reset audit, key rotation.
+
+Q126. Observability?
+Answer: Correlation IDs across HTTP/STOMP/Ollama; stream active/duration/cancel/error, reconnect, DB/Redis/model latency, RAG job/retrieval quality; safe redaction.
+
+Q127. SLO examples?
+Answer: Login availability, first-token latency, stream completion, reconnect recovery, search p95, upload job completion. Actual targets repository me N/A.
+
+Q128. Graceful degradation?
+Answer: Redis active/disconnect state → single-node local fallback, while rate-limit helper falls back to count `1`; transient Ollama connection failures currently emit neither ERROR nor DONE; synchronous RAG retrieval failure is not guaranteed a typed terminal event; voice unavailable ho to typing remains. Clear dependency-failure UX is a production improvement, not a complete current guarantee.
+
+Q129. Deployment migration strategy?
+Answer: Expand/contract schema, backward-compatible app versions, Flyway prechecks, V12 backfill runbook, canary and rollback without destructive reset.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q130. “Redis makes streaming fully distributed”?
+Answer: False; metadata shared, execution/broker local.
+
+Q131. “JWT means authorization solved”?
+Answer: False; authentication plus resource owner/admin checks needed.
+
+Q132. “Authenticated endpoint cannot have IDOR”?
+Answer: False; /test-search ownership gap example.
+
+Q133. “Unique constraint makes upsert atomic success”?
+Answer: False; loser error possible.
+
+Q134. “RAG vectors DB me indexed search hote”?
+Answer: False; JSONB all loaded/scored Java.
+
+Q135. “Browser voice audio never leaves device”?
+Answer: Unsupported.
+
+Q136. “Current main includes branch tips”?
+Answer: False: 4185ea6 and 75fed10 unmerged.
+
+Q137. “Context-load test proves behavior”?
+Answer: False; only Spring startup smoke.
+
+Q138. “Admin URL means admin authorization”?
+Answer: False.
+
+Q139. “Prompt rule eliminates hallucination”?
+Answer: False.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q140. Streaming evolution?
+Answer: stream-stop-fix cancellable NEW/EDIT/STOP → reconnect-recovery active status/partial persistence/stale guards → streaming UX client correlation/cross-tab polish → Redis metadata externalization. Execution remains local.
+
+Q141. Auth evolution?
+Answer: login UI/JWT/STOMP/reset → multi-user sessionStorage → refresh token hashed rotation → environment/CI hardening. Frontend refresh integration remains gap.
+
+Q142. Search evolution?
+Answer: Owner-scoped backend → UI results → message-history DB paging → collapsed-sidebar access → dialog/highlight/navigation. Paging change message-history endpoint ke liye tha; search-result list khud unpaged rahi. Commit ownership crosses branch/merge line; merge title alone unreliable.
+
+Q143. History/pin/feedback evolution?
+Answer: Persistent owner history enables search/edit/recovery; V6 pin session ordering; V7/V8 per-message feedback and reason. 4185ea6 strict reason/history tip unmerged.
+
+Q144. RAG/voice evolution?
+Answer: Document commits upload through prompt/hash; merged 14b38eb left mode regression; 75fed10 tip tests/fix unmerged; main got related 920edf5; 5df9a34 voice layered on text send.
+
+Q145. Production hardening interaction?
+Answer: Flyway/env/CI/Actuator/rate limiting provide baseline, but endpoint RBAC, distributed limiting/streams, comprehensive tests still absent.
+
+Q146. Swagger/Postman reliability?
+Answer: Useful contracts but may lag effective context paths. Source/config integration tests are authority.
+
+Q147. Why ancestry matters?
+Answer: A feature branch can contain inherited commits or unmerged tip beyond merge parent. `branch --contains`, parent diffs and merge-base prevent false ownership/current-main claims.
+
+Q148. Current main vs feedback tip?
+Answer: Main optional negative reason behavior/type-only history; 4185ea6 stricter reason validation, reason restore and parser error mapping.
+
+Q149. Current main vs document tip?
+Answer: Main 920edf5 explicit mode implementation; 75fed10 related non-equivalent patch plus mode/prompt tests absent from main.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q150. Backend/frontend?
+Answer: Spring Boot 3.3.5/Java 17; React 19.
+
+Q151. Transport?
+Answer: REST CRUD/auth + STOMP streaming.
+
+Q152. Persistence?
+Answer: PostgreSQL JPA/Flyway V1-V12.
+
+Q153. AI?
+Answer: Ollama sync/stream + embeddings.
+
+Q154. Auth?
+Answer: BCrypt, access JWT, hashed rotating refresh tokens, STOMP CONNECT JWT.
+
+Q155. Stream state?
+Answer: Local Disposable + Redis metadata/fallback; not fully distributed.
+
+Q156. Search?
+Answer: Owner-scoped unpaged relational title/message search plus frontend dialog/highlight. Message-history endpoint separately page/size support karta hai.
+
+Q157. Feedback?
+Answer: PUT owner-checked completed-message upsert; V7 unique; optimistic rollback; no admin RBAC analytics.
+
+Q158. RAG?
+Answer: PDFBox, 25MB, global SHA-256, V9-V12, JSONB, Java cosine+BM25, aur bounded selected raw chunk content. Complete prompt question/history/system text ki wajah se strictly bounded nahi hai.
+
+Q159. Voice?
+Answer: Browser SpeechRecognition final transcript; no backend audio API.
+
+Q160. Main tests?
+Answer: Only contextLoads; no frontend tests.
+
+Q161. Top security gaps?
+Answer: Analytics no admin RBAC, diagnostic document ownership gap, JS token/XSS and exposed operational routes to review.
+
+Q162. Top reliability gaps?
+Answer: Cross-node stream cancellation, document compensation, refresh race, behavioral tests.
+
+Q163. Top performance gaps?
+Answer: Java full-vector scan, sync ingestion, frequent partial writes, relational contains search.
+
+Q164. Unmerged tips?
+Answer: 4185ea6 feedback; 75fed10 document.
+
+Q165. Production priorities?
+Answer: Tests first; close authorization gaps; distributed stream lease/broker; async RAG/vector index; observability/error taxonomy.
+
+FACTUAL UNCERTAINTY
+===================
+1. Repository proves implementation shape, not actual production traffic, SLA, topology, model quality or operational policy.
+2. Proxy/gateway can rewrite effective URLs; paths stated are repository context+controller derivations.
+3. Redis/simple-broker behavior is not a full distributed guarantee; no multi-node test evidence.
+4. Browser speech processing/privacy is vendor-dependent.
+5. Exact historical intent behind commits is not documented; explanations distinguish implementation evidence from reasonable improvement.
+6. README/Postman/OpenAPI may lag code; source/migrations and Git containment used as primary evidence.

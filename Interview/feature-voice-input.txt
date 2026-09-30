@@ -1,0 +1,247 @@
+INTERVIEW PREPARATION
+Branch: feature/voice-input
+
+PROJECT CONTEXT
+===============
+Purpose: Normal/document mode regression restore karna aur browser Web Speech API se voice-to-text input dena.
+Evidence: `920edf5` explicit NORMAL/DOCUMENT routing restore karta hai; `5df9a34` InputBox me voice input add karta hai. Main PR #35/#36 se dono commits contain karta hai.
+Key boundary: Backend audio endpoint, audio persistence aur server-side speech model N/A. Final browser transcript ordinary text ban kar existing STOMP chat flow use karta hai.
+Privacy caveat: Application backend audio upload nahi karta, lekin browser/vendor implementation remote recognition service use kar sakti hai. “Audio device se kabhi bahar nahi jata” repository se prove nahi hota.
+Test evidence: Main me voice-specific ya mode-regression automated tests nahi mile.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q1. Voice input feature ko simple words me explain karo.
+Answer: User mic button se browser `SpeechRecognition` start karta hai. Sirf final recognized text textarea me append hota hai; user usse edit karke normal Send/Enter flow se bhejta hai. Yeh speech-to-text progressive enhancement hai, speech-to-speech feature nahi.
+
+Follow-up Q1.1. Unsupported browser me core chat fail hoga?
+Answer: Nahi. Mic disabled rehta hai aur explanatory title dikhta hai; typed input fully available rehta hai.
+
+Q2. Is branch ki exact lineage kya hai?
+Answer: `920edf5` pehle normal/document chat separation restore karta hai. Uske baad `5df9a34` browser voice input add karta hai. Voice implementation ka backend audio se koi contract nahi.
+
+Q3. SpeechRecognition kaise detect aur configure hota hai?
+Answer: SSR-safe `typeof window !== "undefined"` guard ke baad `window.SpeechRecognition || window.webkitSpeechRecognition` use hota hai. `lang = navigator.language || "en-US"`, `continuous = true`, aur `interimResults = false` set hote hain.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q4. `getRecognition()` ka project-specific flow kya hai?
+Answer:
+1. Unsupported environment me `null` return.
+2. `recognitionRef.current` ho to same instance reuse.
+3. Standard ya webkit constructor se instance create.
+4. Language, continuous aur interim settings configure.
+5. `onstart`, `onresult`, `onerror`, `onend` callbacks register.
+6. Instance ref me cache karke return.
+
+Follow-up Q4.1. React state ke bajay ref kyun?
+Answer: Recognition ek imperative mutable browser object hai. Ref renders ke across same instance rakhta hai bina unnecessary rerender ke; UI-facing text/listening/error state React state me rehti hai.
+
+Q5. `onresult` transcript ko kaise process karta hai?
+Answer: `event.resultIndex` se results iterate hote hain, only `isFinal` results combine hote hain, blank final ignore hota hai. Functional `setText` latest typed text preserve karke required space ke saath transcript end me append karta, error clear karta aur textarea focus karta hai. Caret-position insertion aur duplicate-final dedupe implemented nahi.
+
+Q6. Mic start/stop aur component lifecycle kaise coordinate hote hain?
+Answer: `handleMicClick` unsupported/disabled/streaming guard karta, listening ho to stop karta, warna recognition start karta hai. `stopRecognition` ref absent ho to no-op, `stop()` ko try/catch karta aur listening false karta hai. Send, response Stop, disabled/streaming effect aur unmount cleanup recognition stop karte hain; unmount par ref null hota hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q7. Browser Web Speech API kyun choose ki, backend STT kyun nahi?
+Answer: Browser API se low implementation cost, no app-server audio upload/storage aur existing text pipeline reuse milta hai. Trade-off browser support, vendor behavior, privacy variability aur limited control hai. Consistent cross-browser/custom-model/compliance requirement aaye to backend STT consider hoga.
+
+Follow-up Q7.1. Backend STT add karne par kya naya design chahiye?
+Answer: Audio capture/streaming contract, MIME/size/duration limits, consent, authentication, rate limits, storage/retention policy, model capacity, timeout/retry aur sensitive observability.
+
+Q8. `continuous=true` aur `interimResults=false` kyun?
+Answer: Continuous mode user ko multiple phrases dictate karne deta hai, although browser session autonomously end kar sakta hai. Final-only results flicker aur partial/final reconciliation avoid karte hain, lekin live partial captions nahi milte.
+
+Q9. Transcript auto-send kyun nahi hota aur streaming ke time mic disabled kyun hai?
+Answer: User recognition mistakes review/edit kar sakta hai, accidental send risk kam hota hai. Existing assistant stream ke during mic stop/disable karke competing lifecycle/input states simplify kiye gaye hain; draft dictation during streaming current requirement nahi.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q10. End-to-end numbered flow trace karo.
+Answer:
+1. InputBox browser support detect karta hai.
+2. User mic click karta hai; browser permission/recognition start hota hai.
+3. `onstart` error clear aur listening state true karta hai.
+4. `onresult` only final transcript textarea me append karta hai.
+5. User transcript edit/confirm karta hai.
+6. Send recognition stop karta aur existing `onSend` call karta hai.
+7. ChatApp NORMAL ya DOCUMENT mode fields ke saath ordinary text STOMP payload banata hai.
+8. Existing authenticated streaming backend response process karta hai.
+
+Follow-up Q10.1. Permission app manage karti hai?
+Answer: Permission browser manage karta hai when recognition starts. App user-initiated click use karti aur denial event ko readable UI error me map karti hai; browser settings change app ke control me nahi.
+
+Q11. Important callback behavior kya hai?
+Answer: `onstart` error clear/listening true; `onresult` final text append; `onerror` known browser error ko message me map aur listening false; `aborted` ignore; `onend` listening false. Auto-restart implemented nahi.
+
+Q12. Keyboard, send aur stop behavior?
+Answer: Enter without Shift nonblank text send karta, Shift+Enter newline; streaming ke waqt Enter ignored. Send se pehle recognition stop hota hai. Same button streaming state me recognition stop karke existing `onStop` call karta hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q13. User typing aur speaking ek saath kare to kya hota hai?
+Answer: Transcript functional state update use karta hai, isliye callback latest typed text ke end me append karta hai aur stale-closure overwrite risk reduce hota hai. Current caret location preserve nahi hoti; transcript always end me add hota hai.
+
+Follow-up Q13.1. Language aur punctuation control kahan hai?
+Answer: Language automatic `navigator.language` hai; manual selector N/A. Punctuation browser transcript par depend karti hai; custom voice commands/parser N/A.
+
+Q14. Recognition khud end ho, silence ho ya network fail ho to?
+Answer: `onend` listening false karta. `no-speech`, `network`, permission denial aur missing microphone ke specific messages hain. Typed fallback available rehta hai; automated retry loop nahi.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q15. Rapid double click, stream start aur unmount race kaise behave karte hain?
+Answer: Rapid duplicate `start()` throw kar sakta hai, jise catch karke generic start error dikhaya jata hai. Stream/disabled effect recognition stop karta hai. Unmount stop + ref null karta hai, lekin listeners explicitly detach nahi hote; late callback risk ko generation token/listener cleanup se stronger banaya ja sakta hai.
+
+Follow-up Q15.1. Explicit state machine kya improve karegi?
+Answer: IDLE/STARTING/LISTENING/STOPPING/ERROR states rapid click aur delayed callback ambiguity reduce karengi; current boolean `isListening` browser operation state ko fully represent nahi karta.
+
+Q16. Empty, duplicate ya aborted result ka kya?
+Answer: Empty final transcript ignore hota hai. `aborted` error UI message nahi set karta aur `onend` se state clear expected hai. Duplicate final event received ho to text dobara append ho sakta hai; dedupe N/A.
+
+Q17. Multiple tabs aur microphone contention?
+Answer: Har tab ka independent component/ref/permission context hai. Browser shared microphone contention decide karta hai. Voice state Redis/DB me shared nahi; sent text ke baad existing per-user stream behavior apply hota hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q18. Browser errors exactly kaise map hote hain?
+Answer: `not-allowed`/`service-not-allowed` → microphone denied; `audio-capture` → no microphone; `no-speech` → no speech; `network` → recognition network error; unknown → generic failure. `aborted` silently ignored. Error `role="status"`/`aria-live="polite"` se announce hota hai.
+
+Follow-up Q18.1. Start ya stop synchronously throw kare to?
+Answer: Start failure listening false, visible “could not start” error aur console log deta hai. Stop failure console me log hota hai aur UI listening false ho jati hai; actual browser recognizer state uncertain reh sakti hai.
+
+Q19. Transcript send hone ke baad STOMP/backend fail ho to?
+Answer: Voice-specific error path nahi. Transcript ordinary text hai, isliye existing chat STOMP error/reconnect/STOP behavior apply hota hai. Browser recognition errors backend ko send nahi hote.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q20. Kya audio backend ko jata ya database me store hota hai?
+Answer: Project code me backend audio endpoint, audio upload aur audio DB/file persistence nahi. Unsent transcript component state me; sent transcript normal chat Message ki tarah persist hota hai.
+
+Follow-up Q20.1. Kya “audio local-only” bol sakte hain?
+Answer: Nahi. Browser/vendor SpeechRecognition remote cloud service use kar sakti hai. Safe claim sirf itna hai ki application backend audio receive nahi karta.
+
+Q21. Permission aur privacy hardening kya chahiye?
+Answer: Recognition user click se start hota hai, hidden auto-start nahi. Production me clear privacy notice, browser/vendor disclosure, optional enterprise disable, locale controls aur content/audio-free telemetry chahiye.
+
+Q22. Secure context aur input security?
+Answer: Mic APIs commonly HTTPS secure context demand karti hain; exact browser behavior varies. Transcript typed input jaisa untrusted text hai, so downstream auth, validation/render sanitization same rehni chahiye. Voice trust boundary bypass nahi karta.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q23. Voice feature ke database changes kya hain?
+Answer: N/A. Voice-specific migration/table/column nahi. Audio persist nahi hota; only sent transcript existing message persistence use karta hai.
+
+Q24. `920edf5` mode restore ka DB impact?
+Answer: N/A. Change ChatStompPayload, ChatWebSocketController aur frontend mode/payload routing me hai, schema me nahi.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q25. Voice REST/audio API kya hai?
+Answer: N/A. Browser recognition app REST contract se outside hai. Final text existing STOMP `/app` chat flow se jata hai; voice-specific payload field nahi.
+
+Q26. `5df9a34` aur `920edf5` ke API-contract effects?
+Answer: `5df9a34` backend API change nahi karta. `920edf5` explicit `chatMode` semantics restore karta: NORMAL ordinary chat; DOCUMENT ko selected document ID chahiye.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q27. InputBox ka UI state aur accessibility implementation?
+Answer: `text`, `isListening`, `voiceError` state; `recognitionRef`, `textareaRef` refs. Mic disabled when component disabled, streaming, or unsupported. Button dynamic `aria-label`, `aria-pressed`, title aur listening CSS class use karta; errors live status me render hote hain.
+
+Follow-up Q27.1. Accessibility me aur kya improve/test karoge?
+Answer: Keyboard-only flow, permission/error announcement, focus behavior, contrast, reduced-motion, screen-reader labels aur typed fallback. Voice ko mandatory input method nahi banana.
+
+Q28. Current frontend limitations?
+Answer: Transcript caret par nahi, end me append hota; manual locale/partial captions/custom commands/dedupe N/A; direct window API component testing hard banata; explicit recognition state machine/listener detachment absent.
+
+Q29. Mode payload frontend se kaise banta hai?
+Answer: `applyChatMode` DOCUMENT without uploaded/selected document prevent karta. `buildModePayloadFields` NORMAL ko explicit mode with no documentId aur DOCUMENT ko explicit mode + documentId deta hai; new/edit/recovery flows me same intent preserve hona chahiye.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q30. Voice feature ka main concurrency problem kya hai?
+Answer: Browser callbacks, React state/effects, rapid clicks, stream-state changes aur unmount asynchronous order me ho sakte hain. DB transaction voice-recognition stage par relevant nahi.
+
+Q31. Callback idempotency aur stale callbacks?
+Answer: Listening false repeatedly set karna harmless hai, but duplicate transcript append idempotent nahi. Ref null listeners detach nahi karta; mounted/generation guard aur handler cleanup stronger design hai.
+
+Q32. Existing real-time system se relation?
+Answer: Voice final text ke baad same `clientStreamId`, STOP, reconnect aur correlated stream events use karta hai. Voice audio/listening state Redis ya WebSocket se synchronize nahi hoti.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q33. Performance impact kya hai?
+Answer: Application server audio process nahi karta, so voice-specific backend compute/bandwidth minimal; final transcript normal text payload hai. Frontend callback/state cost small hai, but long dictation existing message/prompt limits hit kar sakti hai.
+
+Q34. Resource/lifecycle concerns?
+Answer: Continuous recognition battery/network behavior browser/vendor-dependent hai. Explicit stop on send/stream/unmount and one cached recognizer leaks reduce karte hain; listener cleanup aur duration limits improvement hain.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q35. Current test evidence aur minimum unit tests?
+Answer: Main me voice/mode-specific tests nahi. Mock SpeechRecognition se detection, config, instance reuse, final-only append, typed+spoken merge, known/unknown errors, start/stop exceptions aur cleanup test karunga.
+
+Follow-up Q35.1. Browser API ko testable kaise banaoge?
+Answer: Recognition construction/callback wiring ko injectable adapter ya custom hook me isolate karunga, taki deterministic fake implementation use ho aur component browser globals par directly depend na kare.
+
+Q36. Integration/E2E tests kya cover karenge?
+Answer: Permission allow/deny, unsupported browser fallback, rapid click, stream-start stop, Enter/Shift+Enter/send/response Stop, unmount, accessibility announcements aur Chromium/WebKit support behavior.
+
+Q37. Mode/privacy regression tests?
+Answer: Missing mode NORMAL, NORMAL stale documentId ignore, DOCUMENT requires owned ID; `75fed10` branch tip par analogous mode tests hain but main me nahi. Network inspection app backend ko audio upload na hone ko verify kar sakta hai; vendor-level processing claim environment-specific rahega.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q38. Production hardening priorities?
+Answer: Privacy notice, support/error telemetry without audio/text, explicit recognition state machine, callback cleanup, locale picker, browser E2E matrix, secure HTTPS deployment aur accessible typed fallback.
+
+Q39. Backend STT ya offline STT kab choose karoge?
+Answer: Backend STT consistent models/languages/compliance control deta but cost, latency, audio security/retention add karta. On-device/WASM privacy/offline improve kar sakta but bundle size, CPU, model distribution aur browser compatibility trade-offs hain. Current feature offline guarantee nahi.
+
+Q40. Safe observability kya hogi?
+Answer: Support availability, permission/error category, start-to-final latency, stop reasons aur browser family aggregate; raw audio/transcript log nahi. Actual production privacy policy/SLA repository me N/A.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q41. “`interimResults` true hai aur live partial transcript dikhta hai” — correct?
+Answer: False. `interimResults=false`; only final results append hote hain.
+
+Q42. “Voice automatically send hota aur Spring audio process karta hai” — correct?
+Answer: False. Transcript editable textarea me aata; user send karta. Spring backend audio receive/process nahi karta.
+
+Q43. “Unsupported browser fail karta aur audio guaranteed local hai” — correct?
+Answer: Dono false. Typed fallback works; browser vendor remote recognition use kar sakti hai.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q44. Document-chat branch se exact relation?
+Answer: Merged document work through `14b38eb` ke baad normal/document routing regression ko main lineage me `920edf5` repair karta hai. Document tip `75fed10` same concern par related but non-equivalent patch/tests hai; identical commit bolna wrong hai.
+
+Q45. Streaming, auth aur Redis branches se relation?
+Answer: Recognition itself local/browser aur auth-independent hai. Final transcript existing authenticated STOMP send, streaming/STOP/reconnect/client correlation use karta; resulting stream metadata Redis path me ja sakta hai, voice/audio state nahi.
+
+Q46. Feedback aur multi-user branches se relation?
+Answer: Voice question ka completed assistant answer generic feedback le sakta, direct voice-feedback contract N/A. Recognition state tab-local hai; sessionStorage-based tab auth isolation separate multi-user behavior hai.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q47. Two commits aur roles?
+Answer: `920edf5` mode restore; `5df9a34` voice input.
+
+Q48. Detection/config one-liner?
+Answer: Standard/webkit SpeechRecognition; navigator locale fallback en-US; continuous true; interim false.
+
+Q49. Lifecycle/error one-liner?
+Answer: Click start/stop, final callback append, known errors map, send/stream/unmount stop, typed fallback always.
+
+Q50. Architecture, risk aur best improvement?
+Answer: Browser STT → editable text → existing mode-aware STOMP; no backend audio/storage. Biggest risks vendor privacy/browser differences and callback races; priorities privacy notice, browser tests, explicit state machine and cleanup.
+
+FACTUAL UNCERTAINTY
+===================
+1. SpeechRecognition processing location, audio retention and availability browser/vendor-specific hain; repository prove nahi karti.
+2. Supported browser/version matrix, product privacy policy, production telemetry aur SLA N/A.
+3. `920edf5` aur `75fed10` same mode-separation concern address karte hain, exact patch equivalence unsupported.
+4. Voice behavior source/commits se verified hai; dedicated automated test evidence absent.

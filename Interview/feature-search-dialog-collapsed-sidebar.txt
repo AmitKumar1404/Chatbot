@@ -1,0 +1,208 @@
+FEATURE/SEARCH-DIALOG-COLLAPSED-SIDEBAR — INTERVIEW PREPARATION
+Evidence: owned commit 51ad3cc; corresponding docs, diff, and current source at a62003a.
+Scope note: Frontend-only enhancement over existing search APIs. Commit entered main through multi-user-login PR ancestry, but ba1f78a did not implement it. No automated tests added.
+
+PROJECT CONTEXT
+===============
+Q1. Feature kya add karti hai?
+Answer:
+Collapsed sidebar se modal-style search experience, result navigation to target chat, source message ID plus keyword based scroll/highlight, and dialog keyboard/open-close state.
+
+Q2. Base dependency?
+Answer:
+Existing /api/v1/search and chat messages APIs from feature/chat-search. 51ad3cc ne backend contract or DB schema change nahi kiya.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q3. Modal dialog kya hota hai aur kab useful hai?
+Answer:
+Modal dialog temporary focused interaction surface hota hai jo underlying page ke upar open hota hai. Limited layout space me search, confirmation, ya focused input ke liye useful ho sakta hai, lekin focus management, Escape handling, accessible labeling, aur close behavior clearly implement karna padta hai.
+
+Q4. UI navigation me stable ID ko list index ya keyword se better identity kyun maana jata hai?
+Answer:
+Index reorder, pagination, insert, ya delete ke baad change ho sakta hai; keyword multiple records me repeat ho sakta hai. Stable ID exact resource ko identify karta hai, jabki keyword presentation-level matching ke liye separately use ho sakta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q5. handleSearchResultClick flow?
+Answer:
+Searched keyword capture, openedSearchMatch set, target session select/load with match preserved, then collapsed dialog close. ChatWindow props target message and keyword receive karte hain.
+
+Q6. ChatWindow kya karta hai?
+Answer:
+Message refs register, loaded messages me sourceMessageId match identify, target bubble scroll into view, and matching text portions mark elements se render.
+
+Follow-up Q6.1. Is project me highlight identity kaise split hai?
+Answer:
+`sourceMessageId` exact message locate karta hai aur keyword us message ke matching text segment ko mark karta hai. Keyword alone multiple messages ko ambiguous bana sakta hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q7. Backend highlight snippets kyun nahi?
+Answer:
+Existing DTO already source message and content context deta tha, so client highlight avoided API change. Trade-off Markdown-aware rendering complexity and possible stale content hai.
+
+Q8. Index-based navigation kyun nahi?
+Answer:
+Message order/pagination/update se index unstable hai. Persistent source message ID better identity hai.
+
+Q9. Browser native find kyun nahi?
+Answer:
+Native find unloaded chats/messages navigate nahi karta and app-level result metadata/session selection nahi samajhta.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q10. End-to-end flow?
+Answer:
+Collapsed search icon dialog opens; controlled query existing search API call karti hai; results snippets show; click target chat load karta hai; openedSearchMatch ChatWindow ko milta hai; ref/effect target bubble scroll and highlight karta hai.
+
+Q11. Dialog close flow?
+Answer:
+Current component me result selection, backdrop click, Escape, ya sidebar expansion dialog state close karte hain. Separate explicit close button/control implement nahi hai. Active chat changes par stale `openedSearchMatch` clear hona chahiye unless navigation intentionally preserve kare.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q12. Follow-up: target message loaded na ho?
+Answer:
+Current navigation loaded messages me match na find kar sake. Improvement page/cursor around message endpoint or iterative page fetch hai; endless full history load avoid karunga.
+
+Follow-up Q12.1. Message deleted ho?
+Answer:
+Gracefully chat open karo, highlight clear karo, “message no longer available” optional feedback do; crash nahi.
+
+Q13. Follow-up: same keyword multiple times?
+Answer:
+All matching segments mark ho sakte hain within target message, but only source ID matched bubble target hai.
+
+Q14. Follow-up: Escape handling?
+Answer:
+Only when dialog open, listener close kare and cleanup on close/unmount. Focus opener par restore hona accessibility requirement hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q15. Query regex characters contain kare?
+Answer:
+Highlight implementation string splitting/matching safely kare; dynamic regex ho to escaping required. React text nodes raw HTML injection avoid karte hain.
+
+Q16. Assistant content Markdown ho?
+Answer:
+Current highlighted assistant path text+mark rendering use kar sakti hai, so Markdown formatting trade-off exists. Markdown AST-aware highlight stronger solution hai.
+
+Q17. Search response late after dialog close?
+Answer:
+State update harmless ho sakti hai but stale reopen/results issue ho sakta hai. AbortController/request ID and mounted/open guard improve correctness.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q18. Search API fail?
+Answer:
+Current implementation API failure par console error log karke results empty array set karti hai. Zero-result success bhi empty array deta hai, aur dialog dono cases me same “No matching chats or messages found” state render karta hai; dedicated error state nahi hai.
+
+Production improvement:
+Error aur successful zero-results ke liye separate state/message rakho, loading reset guarantee karo, aur retry action do.
+
+Q19. scrollIntoView fail/ref missing?
+Answer:
+Null guard and no-op; chat remains usable. Retry after messages render can be bounded effect, not uncontrolled timer loop.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q20. Security impact?
+Answer:
+No new auth boundary. Existing backend owner-scoped search/session access remains authoritative. Frontend dialog hiding/filtering authorization nahi.
+
+Q21. XSS concern?
+Answer:
+Snippets/content text nodes and mark components se render hone chahiye, dangerouslySetInnerHTML avoid. Markdown renderer sanitization policy separately verify.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q22. Database change?
+Answer:
+N/A. No repository/entity/migration changes. It consumes existing search and messages data.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q23. API change?
+Answer:
+N/A branch-owned contract change. It consumes GET /api/v1/search and chat messages endpoint.
+
+Q24. Better API for deep result?
+Answer:
+GET message context by owned session/message ID or cursor-around-message could reliably load target without all pages. This is improvement, not current behavior.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q25. Accessible dialog requirements?
+Answer:
+role=dialog, aria-modal, labelled title, initial focus, focus trap, Escape, backdrop semantics, body scroll lock, and focus restoration. Existing feature ko complete accessibility without test/audit claim nahi.
+
+Q26. State organization improvement?
+Answer:
+query/results/loading/error/dialogOpen/openedMatch separate but coordinated reducer me model; request cancellation and navigation transition explicit events banayein.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q27. Real-time issue?
+Answer:
+Streaming or edits search result fetch aur target load ke beech content change kar sakte hain. ID stable ho, keyword stale ho to bubble locate but exact mark absent ho sakta hai.
+
+Q28. Repeated result clicks?
+Answer:
+Navigation requests race kar sakte hain. Disable while loading or request sequence guard latest selection win karaye.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q29. Performance concerns?
+Answer:
+Large result list render, repeated string split/highlight, many message refs, and full history load. Virtualization and bounded results only measurement/scale need par.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q30. Existing tests?
+Answer:
+Owned commit me automated tests nahi.
+
+Q31. Test matrix?
+Answer:
+Open/close/Escape/focus, search error/empty, result navigation, source ID matching, multiple keyword occurrences, Markdown target, deleted/unloaded message, stale response, repeated click, and XSS-like text.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q32. Production improvements?
+Answer:
+Accessible focus trap, cancellable search, paged results, message-context endpoint, analytics without raw query logging, and E2E keyboard/mobile tests.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q33. Trick: commit belongs to multi-user fix?
+Answer:
+No. 51ad3cc owns dialog/highlighting. It happened to enter main via multi-user-login PR ancestry; actual auth fix is ba1f78a.
+
+Q34. Trick: collapsed icon is 51ad3cc?
+Answer:
+Base collapsed search affordance was 6e79b84. 51ad3cc upgrades interaction to dialog/highlighting.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q35. Search evolution order?
+Answer:
+9dd63af API, 61d3916 sidebar UI, 45cef8c DB paging, 6e79b84 collapsed icon, then separate 51ad3cc dialog/highlighting.
+
+Q36. Multi-user relation?
+Answer:
+Only merge ancestry. ba1f78a swaps token storage; no search rendering logic.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q37. Five facts?
+Answer:
+Owner 51ad3cc; frontend-only; existing API consumer; source ID + keyword highlight; entered via multi-user PR; no tests.
+
+Q38. Biggest gap?
+Answer:
+Accessible focus management aur scalability. Current frontend complete unpaged message history fetch karti hai, isliye “target current page me nahi hai” active behavior nahi hai; large chats me full-history load expensive ho sakta hai. Future paged design aaye to direct message-by-ID or around-message loading add karna hoga.
+
+Q39. Closing line?
+Answer:
+“Maine collapsed navigation constraint ko dialog UX se solve kiya and stable message ID se target locate kiya, while noting that Markdown-aware highlighting, focus management, and current full-history loading need stronger follow-up.”

@@ -1,0 +1,263 @@
+INTERVIEW PREPARATION
+Branch: feature/refresh-token-clean
+
+PROJECT CONTEXT
+Commit `3e9de42` adds V3 `refresh_tokens`, SHA-256 hash-at-rest, token rotation/revocation and POST `/api/v1/auth/refresh`. Raw UUID is returned once. No frontend refresh caller exists, and concurrent replay is not serialized.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Access token aur refresh token ka role kya hai?
+
+Answer:
+Access token short-lived API credential; refresh token longer-lived credential used to obtain a new access token.
+
+Q2. Refresh token ko stateful store me kyun rakhte hain?
+
+Answer:
+Revocation, expiry, device/session tracking and rotation possible hoti hai; pure stateless token me immediate revoke harder hai.
+
+Q3. Hash-at-rest ka benefit kya hai?
+
+Answer:
+Read-only DB leak se stored value directly bearer credential ki tarah use nahi hoti; presented token hash karke compare hota hai.
+
+Follow-up Q3.1: Hash comparison ke liye raw token server par kab aata hai?
+
+Answer:
+Refresh request ke time; service immediately SHA-256 digest banakar indexed stored hash lookup karti hai.
+
+Q4. Rotation kya hai?
+
+Answer:
+Successful exchange old refresh token invalidate karke new refresh token issue karta hai, replay window reduce karne ke liye.
+
+Follow-up Q4.1: Rotation aur reuse detection same hain?
+
+Answer:
+Nahi. Rotation old token revoke karti hai; reuse detection consumed token dobara dikhne par token family compromise identify/revoke karti hai, jo current code me absent hai.
+
+Q5. Hashing aur encryption me difference?
+
+Answer:
+Hash one-way comparison ke liye; encryption reversible with key. Service ko raw refresh token recover karna nahi, only verify karna hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q6. Token generation/storage exact kaise hai?
+
+Answer:
+UUID raw token generate hota hai; SHA-256 UTF-8 digest 64-char hex DB me save hota hai; raw value caller ko return.
+
+Q7. Refresh endpoint ka exact path/contract kya hai?
+
+Answer:
+POST `/api/v1/auth/refresh`, nonblank `refreshToken`; success `AuthResponse` with access token, username and rotated refresh token.
+
+Q8. Login/register behavior me difference?
+
+Answer:
+Login refresh token return karta hai; repository evidence ke according register currently refresh token return nahi karta.
+
+Q9. V3 table ke important constraints?
+
+Answer:
+BIGSERIAL PK, user FK `ON DELETE CASCADE`, unique `VARCHAR(64)` token hash, expiry, revoked flag, created timestamp and indexes.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q10. Raw token DB me store kyun nahi?
+
+Answer:
+DB compromise par plaintext bearer reuse prevent/reduce karne ke liye. High entropy still required.
+
+Q11. Refresh route permit-all kyun ho sakta hai?
+
+Answer:
+Access token expired ho sakta hai; refresh credential possession exchange authenticate karti hai. Permit-all ka matlab no validation nahi.
+
+Q12. JWT ko hi long-lived kyun nahi rakha?
+
+Answer:
+Long-lived access JWT theft impact window bada karta hai and revocation difficult. Short access + stateful rotating refresh better control deta hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q13. Successful refresh flow trace karo.
+
+Answer:
+Raw token hash → unrevoked row lookup → expiry check → old row revoke/save → access JWT generate → new hashed refresh row persist → raw new token response.
+
+Q14. Expiry kaise calculate hoti hai?
+
+Answer:
+`app.jwt.refresh-expiration` milliseconds current `Instant` me add hote hain.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q15. Unique hash constraint kya guarantee karti hai?
+
+Answer:
+Same hash duplicate row prevent. It does not serialize two reads/uses of the same existing row.
+
+Q16. User delete hone par tokens ka kya hota hai?
+
+Answer:
+V3 FK `ON DELETE CASCADE` associated refresh rows remove karta hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q17. Expired token present ho to flow kya hai?
+
+Answer:
+Code row ko revoked mark karke save karta hai, phir unchecked `BadCredentialsException` throw karta hai. Method `@Transactional` hai; Spring default rollback rules ke under unchecked exception transaction rollback kar deti hai. Isliye revoke/save commit nahi hota aur expired row database me unrevoked reh sakti hai. Integration test is behavior ko lock down karna useful hai.
+
+Q18. Same old token simultaneously do requests use kare to?
+
+Answer:
+No row lock/atomic conditional update; both `revoked=false` read karke successor issue kar sakte hain—concurrent replay gap.
+
+Q19. Stolen current refresh token ka risk?
+
+Answer:
+Attacker bearer possession se rotate kar sakta hai. Hash-at-rest network/client theft solve nahi karta.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q20. Invalid/revoked hash lookup ka result?
+
+Answer:
+Service `BadCredentialsException(INVALID_OR_EXPIRED_REFRESH_TOKEN)` throw karti hai. Historical global handler `BadCredentialsException` ko HTTP 401 map karta hai aur generic “Invalid username or password” response deta hai.
+
+Q21. Revoke ke baad new insert fail ho to?
+
+Answer:
+Same transaction DB changes rollback hone chahiye. Service integration test should prove old token state and no partial successor.
+
+Q22. Frontend me refresh fail recovery kya hai?
+
+Answer:
+This branch me caller hi absent hai; logout/re-auth UX implemented claim nahi kar sakte.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q23. Client-side refresh token storage options ka trade-off?
+
+Answer:
+HttpOnly Secure SameSite cookie reduces JS access but needs CSRF design; JS storage XSS exposure badhata hai. Project frontend integration absent hai.
+
+Q24. Token logs me kya rule?
+
+Answer:
+Raw access/refresh token never log; hashes bhi correlation/privacy policy ke bina expose nahi.
+
+Q25. Replay detection rotation se stronger kaise banegi?
+
+Answer:
+Token family lineage track, consumed token reuse detect, family/session revoke and alert.
+
+SECTION 9 — DATABASE QUESTIONS
+
+Q26. Hash index duplicate kyun lag sakta hai?
+
+Answer:
+UNIQUE constraint usually index create karta hai; explicit `idx_refresh_tokens_token_hash` additional/redundant ho sakta hai depending PostgreSQL schema.
+
+Q27. Expired/revoked row cleanup?
+
+Answer:
+Migration/service me cleanup job evidence nahi. Retention policy and indexed batch deletion production improvement hai.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q28. Refresh request GET ke bajay POST kyun?
+
+Answer:
+Credential exchange state mutate karta hai—old revoke/new issue—and sensitive token URL/query logs me nahi jaana chahiye.
+
+Q29. Blank body validation kahan hai?
+
+Answer:
+`RefreshTokenRequest.refreshToken` has `@NotBlank`; malformed/blank request framework validation se reject hoti hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+N/A — backend capability added, but AuthContext/frontend me `/auth/refresh` caller absent hai.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q30. `@Transactional` concurrent replay prevent kyun nahi karta?
+
+Answer:
+Transaction atomicity deta hai; default isolation same row ko concurrent readers se exclusive consume nahi karata.
+
+Q31. Race fix options?
+
+Answer:
+Pessimistic row lock, or atomic `UPDATE ... SET revoked=true WHERE id=? AND revoked=false` affected-row check; then only winner issues successor.
+
+Q32. Frontend 401 storm ko kaise avoid karoge?
+
+Answer:
+Single-flight refresh promise, queued retries, one retry limit and failure par consistent logout—future integration.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q33. Refresh hot path cost kya hai?
+
+Answer:
+SHA-256 cheap; indexed lookup + update + insert main DB work. Cleanup absent ho to table/index growenge.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q34. Core integration tests?
+
+Answer:
+Hash-only persistence, valid rotation, old token rejection, expiry, rollback, user cascade, malformed request and auth response.
+
+Q35. Replay test decisive kaise hoga?
+
+Answer:
+Two threads same raw token simultaneously exchange; hardened implementation me exactly one success and one reject assert.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q36. Production design additions?
+
+Answer:
+Atomic consume, token families/device metadata, cleanup/retention, secure delivery/storage, refresh-specific abuse monitoring and frontend single-flight.
+
+Q37. Secret rotation/incident response?
+
+Answer:
+User/family tokens revoke, signing keys and access-token lifetime policy separate manage; raw tokens never recoverable from hashes.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q38. SHA-256 password hashing ke liye weak, token hashing me kab acceptable?
+
+Answer:
+High-entropy random bearer tokens offline guessing-resistant hote hain, so fast hash can be acceptable; human passwords need salted slow KDF.
+
+Q39. Unique constraint replay solve karti hai?
+
+Answer:
+Nahi. It prevents duplicate token hashes, not two successful consumes of one row.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q40. Hardening migrations se sequence relation?
+
+Answer:
+V3 comes after V1/V2, but refresh implementation ownership `3e9de42`; later migrations don't backfill replay safety.
+
+Q41. Rate limiter refresh endpoint protect karta hai?
+
+Answer:
+Verified limiter classifies login and chat REST; refresh route coverage claim nahi kar sakte.
+
+SECTION 18 — RAPID REVISION
+
+Q42. Rapid recall?
+
+Answer:
+V3; UUID raw once; SHA-256 hash; rotate/revoke transaction; `/auth/refresh`; login returns token; no frontend caller; no replay lock.

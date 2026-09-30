@@ -1,0 +1,245 @@
+FEATURE/REDIS-STREAM-STATE — INTERVIEW PREPARATION
+Evidence: branch-owned commit e844265, inherited f3fb373; corresponding docs, diff, and current source at a62003a.
+Scope note: Redis stores coordination metadata, not AI response chunks. Owned commit contains no Redis integration/failover tests.
+
+PROJECT CONTEXT
+===============
+Q1. Feature kya solve karti hai?
+Answer:
+Active-stream and disconnect metadata ko single JVM memory se Redis-visible state me move karti hai, while Redis outage par local ConcurrentHashMap fallback retain karti hai. This improves cross-instance visibility but does not make stream execution fully distributed.
+
+Q2. Exact structures?
+Answer:
+Active key chatbot:stream:active:{principal} stores JSON ActiveStreamState with TTL; chatbot:stream:disconnected sorted set stores principal members with disconnect epoch-millisecond scores and its own TTL.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q3. Redis yahan cache hai?
+Answer:
+Traditional DB-result cache nahi. It is ephemeral infrastructure/coordination state registry. Source response text still message DB and live stream path me hai.
+
+Q4. TTL kyun?
+Answer:
+Crash/cleanup failure ke baad stale active/disconnect metadata eventually expire ho. Default active TTL 1800 seconds with minimum 60; disconnect ZSET TTL default 3600 seconds.
+
+Q5. Sorted set kyun?
+Answer:
+Disconnect time score ke basis par cutoff tak expired users efficiently query karne ke liye. Current lookup bounded to 256 users.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q6. saveActiveStream behavior?
+Answer:
+Local fallback map first/update hota hai, then Redis value JSON with TTL set attempt hota hai. Redis RuntimeException helper catch karta hai and degraded local mode continue hota hai.
+
+Q7. getActiveStream behavior?
+Answer:
+Redis read/deserialize preferred; unavailable or missing path local map fallback use karta hai. This availability choice stale/divergent state possibility introduce karti hai.
+
+Q8. Disposable kahan hai?
+Answer:
+Reactor Disposable ActiveStreamRegistry ke local activeStreams map/JVM me remains. Redis state owner instance record kar sakti hai, but remote JVM Disposable cancel nahi kar sakta.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q9. Redis instead of SQL?
+Answer:
+High-churn ephemeral state, TTL and sorted-set cutoff Redis ke natural primitives hain. SQL possible tha but cleanup/write load and schema semantics different hote. Durable audit required ho to SQL/event log separate concern hai.
+
+Q10. Local fallback kyun?
+Answer:
+Redis outage ko immediate total chat outage na banana. Trade-off consistency hai: multiple nodes independent fallback maps me split-brain metadata rakh sakte hain.
+
+Q11. Pub/Sub kyun enough nahi?
+Answer:
+Pub/Sub durable state/replay nahi deta and offline consumer message miss kar sakta hai. Distributed STOP/ownership ke liye broker, leases or Redis Streams plus idempotency needed ho sakta hai.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q12. Active stream lifecycle trace?
+Answer:
+Registry stream start par local ActiveStream/Disposable and RedisInfraStateStore ActiveStreamState save karti hai. Status query Redis-visible metadata read karti hai. Completion/cancel matching stream remove karta hai. TTL orphan key ko eventual cleanup deta hai.
+
+Q13. Disconnect cleanup flow?
+Answer:
+Socket disconnect principal ko ZSET score timestamp se mark karta hai. Reconnect marker clear karta hai. Scheduled cleanup cutoff se older bounded users fetch karke still-disconnected principals cancel/clear karta hai.
+
+Q14. withRedis/fromRedis?
+Answer:
+Supplier operation execute karte hain, Redis runtime failure suppress/degrade karte hain, and AtomicBoolean-based warning guard log spam limit karta hai. Programming/serialization failures ko blindly swallow karna risky ho sakta hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q15. Follow-up: Redis key me principal safe hai?
+Answer:
+Authenticated principal namespace gives user scope, but key normalization and PII/log exposure consider karna chahiye. Arbitrary caller username trust nahi hona chahiye.
+
+Follow-up Q15.1. ownerInstanceId kya karta hai?
+Answer:
+State me origin instance identify ho sakta hai, but current evidence says enforcement/routing complete nahi. Presence ko distributed cancellation guarantee nahi bolunga.
+
+Q16. Follow-up: remove-if-matches kyun?
+Answer:
+Old stream completion newer stream ka key delete na kare. Compare-and-delete intent correlation safety deta hai; true atomicity Redis-side Lua/CAS se stronger hogi.
+
+Follow-up Q16.1. GET then DEL atomic hai?
+Answer:
+Separate operations race kar sakti hain. Lua script or versioned conditional operation required for atomic compare-delete.
+
+Q17. Follow-up: warning once drawback?
+Answer:
+Log spam reduce hota hai, but long outage visibility hide ho sakti hai. Metrics/health status continuous signal dene chahiye; recovery log transition useful hai.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q18. Redis down at write, up at read?
+Answer:
+Write only local node par ho sakti hai; another node Redis me state nahi dekhega. Availability remains but cross-instance consistency lost.
+
+Q19. TTL stream se pehle expire?
+Answer:
+Long generation active key vanish kar sakti hai if TTL refresh nahi hota. Lease renewal/heartbeat and expected max duration policy chahiye.
+
+Q20. Wrong instance STOP receive kare?
+Answer:
+Metadata active dikh sakti hai but local Disposable absent. Current design remote cancel guarantee nahi. Route command to owner or shared job control required.
+
+Q21. Redis stale and local fresh?
+Answer:
+Read precedence can return stale shared data until corrected/expired. Version/timestamp and compare rules required; fallback divergence is explicit limitation.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q22. Malformed JSON?
+Answer:
+Deserialization failure degraded path trigger kar sakta hai, but metrics and key quarantine/delete useful hain. Repeated corrupt key warning-once se invisible nahi hona chahiye.
+
+Q23. Redis timeout?
+Answer:
+Driver timeout request latency impact karta hai before fallback. Low bounded timeouts, pool health, circuit breaker, and metrics production improvements hain.
+
+Q24. Fallback itself fail?
+Answer:
+ConcurrentHashMap in-process operations generally simple hain, but process crash state lose karta hai. Fallback durability claim nahi.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q25. Redis security checklist?
+Answer:
+Private network/TLS as environment supports, authentication/ACL least privilege, no public exposure, secrets env/manager, key/value logs redacted, and command scope limited.
+
+Q26. Principal keying enough authorization?
+Answer:
+Nahi. Caller principal backend auth se derive hona chahiye and owner checks remain. Redis is internal state store, direct client access nahi.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q27. SQL changes?
+Answer:
+N/A. e844265 adds no SQL migration. Redis is separate data store.
+
+Q28. Is Redis durable database?
+Answer:
+This feature treats metadata ephemeral with TTL/fallback; persistence mode/replication guarantees repository evidence se claim nahi. Message DB remains durable chat recovery source.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q29. New endpoint?
+Answer:
+N/A. No new API. Existing GET /api/v1/chat/stream/active indirectly new store read karta hai.
+
+Q30. API behavior Redis down par?
+Answer:
+Local fallback state available ho to same node status answer kar sakta hai; another node may return idle. Contract degraded-consistency expose kar sakta hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q31. Frontend changes?
+Answer:
+Direct branch-owned frontend files nahi. Existing recovery UI shared metadata benefit consume karti hai through active endpoint; Redis implementation browser ko expose nahi.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q32. Redis operations atomic hain?
+Answer:
+Single SET/ZADD/ZREM individually atomic, but multi-command read-check-delete sequence automatically atomic nahi. Lua, WATCH/MULTI or version tokens needed for compound invariant.
+
+Q33. Split-brain scenario?
+Answer:
+Redis outage during multi-node traffic lets each node local state maintain kare. Same principal streams conflict kar sakte hain. Recovery par reconciliation policy absent ho to stale state win kar sakti hai.
+
+Q34. Fully distributed kyun nahi?
+Answer:
+Disposable, active execution and simple STOMP broker local process concerns remain. Redis metadata only “what appears active” shares, “who can control execution” complete nahi.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q35. Redis hot key concern?
+Answer:
+One principal one active key generally distributed; disconnected ZSET global hot structure ban sakta hai. 256 batch bound controls cleanup work but backlog monitoring required.
+
+Q36. Serialization overhead?
+Answer:
+Small JSON metadata likely modest, but measure p95 latency, operation rate, pool saturation, payload size and fallback rate. No benchmark exists.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q37. Existing tests?
+Answer:
+Owned commit me Redis integration/failover tests nahi.
+
+Q38. Required integration tests?
+Answer:
+Testcontainers Redis: save/get/remove, TTL expiry, malformed JSON, ZSET cutoff/order/256 cap, Redis outage fallback, recovery, conditional delete race, and two application instances.
+
+Q39. Chaos tests?
+Answer:
+Redis restart, network latency/partition, failover during start/cancel, key expiry mid-stream, and node crash with remote STOP.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q40. Production redesign?
+Answer:
+Lease record {streamId, ownerInstance, version, expiresAt}, periodic renewal, atomic Lua acquire/release, command routing to owner through broker, durable job/event state, and reconciliation worker.
+
+Q41. Observability?
+Answer:
+Redis latency/errors, fallback mode duration, active-key count, ZSET backlog, stale lease cleanup, wrong-owner STOP, compare-delete failures, and orphan local Disposables.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q42. Trick: Redis added means horizontal scaling solved?
+Answer:
+Nahi. Shared metadata is necessary but not sufficient. Execution cancellation and event delivery remain local.
+
+Q43. Trick: local fallback guarantees HA?
+Answer:
+It improves single-node availability during Redis outage, but can reduce consistency and cross-node correctness. HA claim requires tested architecture.
+
+Q44. incrementRateLimitCounter used?
+Answer:
+Structure helper e844265 store me appears, but later Bucket4j path does not use it. Is branch ko active rate-limiting implementation credit nahi dena.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q45. Inherited commit?
+Answer:
+f3fb373 streaming UX/tab ownership is inherited. Redis branch-owned work only e844265.
+
+Q46. Reconnect foundation?
+Answer:
+339d9d7/492d39c introduced active metadata/status and partial DB recovery. e844265 storage implementation ko Redis-backed best-effort banata hai.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q47. Seven facts?
+Answer:
+Owner e844265; key chatbot:stream:active:{principal}; disconnect ZSET; TTL 1800/3600 defaults; local fallback; 256 cleanup cap; Disposable local.
+
+Q48. Biggest risk?
+Answer:
+Redis/local divergence and wrong-instance control because compound ownership/execution is not distributed atomically.
+
+Q49. Closing line?
+Answer:
+“Maine Redis ko ephemeral coordination store ke roop me use kiya with TTL and graceful local fallback, but clearly separate kiya ki metadata distribution execution distribution nahi hoti.”

@@ -1,0 +1,185 @@
+FEATURE/RESPONSIVE-COLLAPSIBLE-SIDEBAR — INTERVIEW PREPARATION
+Evidence: owned commits 7957016 and 59906c6; corresponding docs, diffs, and current source at a62003a.
+Scope note: Frontend-only feature. No branch-owned API, backend, SQL migration, or automated UI tests.
+
+PROJECT CONTEXT
+===============
+Q1. Branch ne kya deliver kiya?
+Answer:
+Desktop par expanded/collapsed sidebar rail, mobile par overlay drawer, toggle/header alignment, persistent desktop preference, aur later edit textarea overflow fix. Ownership 7957016 and 59906c6 ki hai.
+
+Q2. State model kya tha?
+Answer:
+Viewport breakpoint se desktop/mobile mode decide hota hai. Desktop collapse preference localStorage me persist hoti hai; mobile drawer open state transient React state hai. Escape, backdrop click, resize aur body-scroll cleanup lifecycle ka part hain.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q3. Responsive aur collapsible me difference?
+Answer:
+Responsive layout viewport ke according structure adapt karta hai. Collapsible user-controlled density preference hai. Desktop collapsed rail aur mobile drawer ko ek boolean samajhna bugs create kar sakta hai.
+
+Q4. UI preference ke liye localStorage kab suitable hota hai?
+Answer:
+localStorage non-sensitive, browser-local preference ko reload aur browser sessions ke across retain karne ke liye useful hai. Yeh synchronous storage hai, SSR-safe nahi hota, aur sensitive data ke liye suitable nahi hai. Transient state ko persist karna zaroori nahi hota.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q5. Main handlers kya karte hain?
+Answer:
+`updateViewport` breakpoint change process karta hai; `handleSidebarToggle` mode ke according desktop collapse ya mobile drawer toggle karta hai; `handleOutsideClick` open chat menu ko close karta hai; aur Escape listener mobile drawer close karta hai.
+
+Q6. 59906c6 kis bug ka fix tha?
+Answer:
+Message edit textarea available content width se bahar jaakar sidebar ke peeche overflow kar sakta tha. CSS constraints ne shrink/min-width behavior correct kiya; backend behavior change nahi hua.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q7. Desktop preference server DB me kyun nahi?
+Answer:
+Single-browser presentation preference ke liye server persistence unnecessary API/schema complexity hoti. Cross-device synced preference requirement aaye tab authenticated profile setting justify hogi.
+
+Q8. Mobile drawer preference persist kyun nahi?
+Answer:
+Persisted open drawer next load par content cover aur scroll lock kar sakta hai. Transient state predictable and safer hai.
+
+Q9. useSidebarState hook kyun nahi use hua?
+Answer:
+Reconnect branch ne hook add kiya tha, but live usage evidence nahi mila. Responsive implementation 7957016 me ChatApp inline state/handlers se aayi. Improvement: behavior stable hone ke baad tested hook extraction.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q10. Initial render flow?
+Answer:
+Client viewport inspect karta hai, desktop collapse key safely read karta hai, appropriate classes derive hoti hain, and CSS grid/flex/sidebar widths layout render karte hain. Mobile mode me persisted desktop preference drawer open nahi karti.
+
+Q11. Resize desktop se mobile ho to?
+Answer:
+Media-query/change handler viewport mode update karta hai. Drawer/collapse semantics reset or reinterpret hote hain so desktop rail state mobile overlay ko accidentally open na kare. Body overflow cleanup important hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q12. Follow-up: localStorage unavailable ho to?
+Answer:
+Private mode/security policy me read/write throw ho sakta hai. Safe fallback default expanded desktop state hona chahiye; UI interaction storage failure ke karan crash nahi honi chahiye.
+
+Follow-up Q12.1. storage event use hota hai?
+Answer:
+Owned branch evidence me cross-tab preference synchronization guarantee nahi hai. Add karna ho to storage listener and cleanup required hoga.
+
+Q13. Follow-up: body scroll lock ka cleanup?
+Answer:
+Drawer close, viewport switch aur component unmount par previous body overflow restore hona chahiye. Otherwise app ke other screens scroll-disabled reh sakte hain.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q14. What if user edit mode me resize kare?
+Answer:
+Textarea and message container ko min-width:0/max-width constraints follow karne chahiye. 59906c6 isi layout class bug ko target karta hai.
+
+Q15. Rapid toggle clicks?
+Answer:
+Functional state updates stale closure risk reduce karte hain. Animation classes and backdrop state same source of truth se derive hone chahiye.
+
+Q16. Browser zoom ya narrow desktop?
+Answer:
+CSS breakpoint alone device type nahi jaanta; layout should be content-width based and keyboard usable. Visual regression across representative widths required hai.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q17. Is feature me backend exception handling relevant hai?
+Answer:
+N/A. Branch frontend-only hai, no API call. Relevant failures browser storage access, event cleanup, and rendering/layout fallback hain.
+
+Q18. Storage JSON corrupt ho to?
+Answer:
+Current key simple "1" comparison pattern use karta hai, complex parse nahi. Unknown value ko safe default treat karna chahiye.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q19. Security changes?
+Answer:
+N/A for auth/API authorization. localStorage me only non-sensitive collapse preference hai. Token storage ya server permission is branch ka scope nahi.
+
+Q20. UI overlay security concern?
+Answer:
+Security control nahi, but clickjacking/focus visibility/accessibility separate platform concerns hain. Sidebar hidden hona authorization nahi hota.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q21. Database impact?
+Answer:
+N/A. No entity, repository, SQL, or migration change. localStorage browser persistence hai, application database nahi.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q22. API impact?
+Answer:
+N/A. No request/response contract changed. Interview me unrelated REST design invent nahi karunga.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q23. Accessibility checklist?
+Answer:
+Toggle ke accessible label/state, keyboard activation, Escape close, visible focus, mobile drawer semantics, backdrop behavior, logical tab order, and reduced-motion support.
+
+Q24. CSS architecture improvement?
+Answer:
+Width tokens/custom properties, explicit expanded/collapsed/mobile modifiers, container-safe min-width rules, and component-level visual tests. Inline state ko reusable tested hook me extract kar sakte hain.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q25. Concurrency relevant hai?
+Answer:
+Backend concurrency N/A. Frontend event ordering relevant: resize, toggle, Escape and outside-click same frame me fire kar sakte hain. Single state source and idempotent close help karte hain.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q26. Performance risks?
+Answer:
+Repeated viewport listeners, layout thrashing, large subtree rerenders, and expensive width transitions. No performance benchmark evidence hai; optimize only measurement ke baad.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q27. Existing automated tests?
+Answer:
+Owned commits me UI tests nahi hain.
+
+Q28. Kya test karoge?
+Answer:
+Desktop persistence, mobile transient drawer, Escape/backdrop, resize both directions, body-scroll restoration, storage failure, keyboard navigation, textarea edit at narrow widths, and visual snapshots.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q29. Production readiness improvements?
+Answer:
+Accessibility audit, cross-browser visual regression, telemetry for UI exceptions only, shared breakpoint token, SSR-safe window access if framework changes, and cleanup tests.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q30. Trick: localStorage means multi-user preference?
+Answer:
+Origin-scoped key same browser profile me users share kar sakte hain. Since it is harmless layout preference this may be acceptable; user-specific preference ho to key namespace or server profile needed.
+
+Q31. Trick: collapsed sidebar improves security?
+Answer:
+Nahi. Hidden controls still client UI hain; backend authorization always required.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q32. Search branch se relation?
+Answer:
+6e79b84 later collapsed desktop sidebar me search icon affordance add karta hai, but responsive branch ownership 7957016/59906c6 hi hai.
+
+Q33. Reconnect branch hook relation?
+Answer:
+useSidebarState.js 492d39c me add hua but unused evidence hai. Is responsive implementation ko us hook se falsely attribute nahi karna.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q34. Five facts?
+Answer:
+Commits 7957016/59906c6; frontend-only; desktop localStorage preference; mobile transient drawer; textarea overflow CSS fix; no automated tests.
+
+Q35. Best closing line?
+Answer:
+“Maine desktop preference aur mobile transient behavior ko separate model kiya, lifecycle cleanup handle kiya, aur layout bug ko CSS ownership/min-width level par fix kiya without unnecessary API or DB changes.”

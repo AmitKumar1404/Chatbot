@@ -1,0 +1,483 @@
+INTERVIEW PREPARATION
+Branch: feature/document-chat
+
+PROJECT CONTEXT
+===============
+Purpose: PDF upload/indexing aur explicit DOCUMENT mode me hybrid RAG chat.
+Evidence: 7243ca7, 577e560, 18de8ee, 686f82e, 9f5cf10, 411ee9a, 8d7d866, 9b23108, ecc8aaa, 75203d1, 12b3e7a, 0617ead, c126e4f, 14b38eb main me merged. 75fed10 branch-tip-only mode patch/tests hai. Main me related, non-equivalent 920edf5 repair hai.
+Stack: PDFBox, filesystem, Spring multipart, PostgreSQL V9-V12, Ollama embeddings, JSONB vectors, cosine + BM25, STOMP streaming.
+Evidence limit: Main par RAG behavior tests nahi; 75fed10 ke DTO/prompt tests main me absent. Upload/retrieval integration suite evidence nahi.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+===============
+Q1. RAG kya hai?
+Answer: Retrieval-Augmented Generation me user question ke relevant source chunks retrieve karke model prompt me context diya jata hai. General benefit factual grounding hai; project PDF chunks par hybrid retrieval karta hai. Potential improvement: retrieval/output evaluation aur citations.
+
+Follow-up Q1.1. Fine-tuning se difference?
+Answer: Fine-tuning model weights change karta hai; RAG runtime external knowledge inject karta hai. Documents update karna RAG me cheaper hai.
+
+Q2. Branch exactly kya add karti hai?
+Answer: Synchronous PDF upload, extraction, chunking, embeddings persistence, cosine+BM25 retrieval, bounded context, grounded prompt aur DOCUMENT chat routing.
+
+Q3. PDF limit kya hai?
+Answer: 25 MB constant. Empty, non-.pdf filename, non-application/pdf MIME aur over-limit file reject hoti hai.
+
+Q4. Dedupe kaise?
+Answer: Raw PDF bytes ka SHA-256 banta hai. Repository precheck aur V12 global unique file_hash duplicate prevent karte hain.
+
+Follow-up Q4.1. Per-user dedupe hai?
+Answer: Nahi, global. Same bytes dusra user bhi upload nahi kar sakta.
+
+Q5. Embeddings kaha store hote hain?
+Answer: V11 me JSONB column, one embedding row per chunk via unique chunk_id. pgvector/vector index nahi.
+
+Q6. Retrieval signals?
+Answer: Dense cosine semantic similarity aur sparse BM25 lexical relevance; configured weighted fusion.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+==========================
+Q7. uploadDocument exact flow?
+Answer:
+1. File/null/name/MIME/25MB validate.
+2. SHA-256 calculate aur global duplicate precheck.
+3. Username se uploader load.
+4. Upload directory/create UUID filename/copy.
+5. PDFBox text extraction.
+6. Paragraph/heading-aware chunking.
+7. Invalid short chunks filter; heading-aware embedding text build.
+8. Ollama document embeddings sequentially generate.
+9. Document metadata save.
+10. Non-null embedding wale chunks aur JSONB vectors save.
+11. 201 upload DTO return.
+
+Follow-up Q7.1. Transactional hai?
+Answer: Method-level @Transactional nahi. Filesystem, Ollama aur multiple DB saves atomic nahi.
+
+Q8. TextChunkService kya karta hai?
+Answer: Whitespace normalize, headings/lists/sentences identify, oversized units split, target-size chunks pack aur overlap resolve karta hai. Legacy fixed-size helper compatibility ke liye retained hai.
+
+Q9. Heading-aware embedding kya hai?
+Answer: Stored chunk content unchanged rehta hai, par EmbeddingTextBuilder heading/context ko embedding input me include karta hai, semantic representation improve karne ke intent se.
+
+Q10. generateDocumentEmbeddings true batch hai?
+Answer: Nahi. Configured windows me sequential per-text requests hoti hain. Individual failure catch karke corresponding null retain hota hai.
+
+Q11. SimilarityService flow?
+Answer:
+1. Query embedding generate.
+2. documentId ke saare embedding rows DB se load.
+3. Har vector ka cosine score Java me.
+4. Chunk texts ka BM25 score.
+5. Cosine maximum positive ho to cosine scores max se normalize; warna normalized cosine scores zero. BM25 maximum positive ho to BM25 scores normalize; warna keyword contribution zero.
+6. Weighted fusion.
+7. Hybrid, raw cosine, chunkIndex deterministic sort.
+8. topK chunks return.
+
+Q12. ContextBuilder kya enforce karta hai?
+Answer: Blank/exact-normalized duplicate chunks skip karta hai, selected chunk count aur raw selected chunk-content character budget cap karta hai, phir labels add karta hai. `maxCharacters` complete final prompt cap nahi hai: labels, question, history, aur system prompt is raw chunk-content budget ke outside hain. First candidate budget exceed kare to partial truncate ke bajay break behavior relevant hai.
+
+Q13. PromptBuilder kya karta hai?
+Answer: SYSTEM rules, delimited CONTEXT aur QUESTION compose karta hai; answer context me absent ho to exact unavailable phrase instruct karta hai. Model compliance guarantee nahi.
+
+Q14. DOCUMENT STOMP path?
+Answer: Explicit chatMode DOCUMENT, non-null documentId aur owner check ke baad retrieve→context→prompt→history compose→existing Ollama streaming flow.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+=====================
+Q15. Synchronous upload kyun?
+Answer: Implementation simple aur immediate ready response deta hai. Trade-off request latency, timeout aur partial side effects. Production improvement async job/status pipeline.
+
+Q16. PDFBox kyun?
+Answer: JVM-native PDF text extraction existing Spring stack me fit hoti hai. OCR-scanned PDFs ke liye insufficient ho sakti hai; OCR pipeline evidence N/A.
+
+Q17. Chunking kyun?
+Answer: Full PDF prompt/token budget exceed karta aur retrieval precision dilute hoti. Chunking local relevant context select karta hai.
+
+Q18. Overlap kyun?
+Answer: Boundary par split concept continuity preserve hoti. Excess overlap duplicates/context cost badhata; builder dedupe exact normalized duplicates only.
+
+Q19. Hybrid retrieval kyun?
+Answer: Dense synonyms/semantics pakadta, BM25 exact terms/acronyms. Fusion complementary recall improve kar sakti hai; quality benchmark evidence N/A.
+
+Q20. JSONB kyun, pgvector kyun nahi?
+Answer: JSONB simple persistence tha; current Java scoring implementation se compatible. Scale par all-vectors load bottleneck hai, pgvector/HNSW candidate search better.
+
+Q21. SHA-256 filename dedupe se better kyun?
+Answer: Rename hone par same bytes detect hote hain; same filename different content allow ho sakta hai. Hash content identity hai, document semantics identity nahi.
+
+Q22. Explicit mode kyun?
+Answer: Stale documentId ko implicit RAG activation se rokta aur user intent clear karta. Missing mode NORMAL default hona backward compatible hai.
+
+SECTION 4 — HOW DOES IT WORK?
+==========================
+Q23. Upload API flow trace karo.
+Answer: React multipart upload → POST effective /api/v1/api/documents/upload → authenticated principal → service validation/copy/extract/chunk/embed/persist → DocumentUploadResponse → selected document state.
+
+Q24. Effective path double prefix kyun?
+Answer: Context /api/v1 plus controller /api/documents/upload concatenate hoke /api/v1/api/documents/upload.
+
+Q25. Query-time flow numbered?
+Answer:
+1. STOMP payload principal authenticate.
+2. mode resolve.
+3. DOCUMENT requires document ID.
+4. existsByIdAndUploadedBy_Username ownership check.
+5. query embedding.
+6. document vectors/chunks load.
+7. cosine+BM25 rank.
+8. bounded context.
+9. grounded prompt + history.
+10. chunk/done/error events stream.
+
+Q26. Cosine formula?
+Answer: dot(A,B)/(||A||*||B||). Dimension mismatch throws; zero norm returns 0.
+
+Q27. BM25 basics?
+Answer: Term frequency saturation k1, inverse document frequency aur length normalization b use hote hain. Project in-memory candidate corpus ke chunk contents par calculate karta hai.
+
+Q28. Fusion normalization?
+Answer: `maxCosineScore > 0` hone par cosine score maximum se divide hota hai; otherwise normalized vector score zero hota hai. `maxBm25Score > 0` hone par BM25 score maximum se divide hota hai; otherwise normalized keyword score zero hota hai. Phir `vectorWeight * normalizedCosine + keywordWeight * normalizedBm25` fusion hota hai.
+
+Q29. Tie-breaking?
+Answer: Hybrid descending, then raw cosine descending, then chunkIndex ascending; deterministic output.
+
+Q30. V12 migration flow?
+Answer: `file_hash` nullable add hota hai, named unique constraint guarded block me banti hai, legacy NULL precondition check hota hai, phir NOT NULL enforce hota hai. Migration fake hash invent nahi karti. Operator ko legacy NULL rows ke liye either real-byte hash backfill ya documented deletion/cleanup path choose karna padta hai before rerun.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+===================
+Q31. Empty extracted text?
+Answer: Chunk list/valid chunk list empty ho to indexing fail. Copied file cleanup evidence nahi, so orphan possible.
+
+Q32. Partial embedding failures?
+Answer: Null vectors skip hote hain; some chunks persist ho sakte hain. Document status still UPLOADED set hota hai, so “complete index” semantics weak.
+
+Q33. persistedCount zero?
+Answer: RuntimeException, lekin document row pehle save ho chuki ho sakti hai and no enclosing transaction; partial record/file risk.
+
+Q34. Same hash concurrent upload?
+Answer: Both precheck pass kar sakte hain. V12 unique final duplicate rokti, but losing request file/extraction/embedding side effects kar chuki ho sakti hai.
+
+Q35. topK negative ho?
+Answer: Loop bound se empty result likely; explicit validation evidence nahi. topK contract validate karna chahiye.
+
+Q36. Query embedding dimensions mismatch?
+Answer: `IllegalArgumentException("Embedding dimensions do not match.")` throw hota hai. Retrieval/context/prompt construction current controller me Flux subscription se pehle synchronous hoti hai aur us block ke around typed downstream error handler nahi hai; isliye is failure ko guaranteed stream ERROR/DONE envelope kehna sahi nahi.
+
+Q37. No relevant chunks?
+Answer: Empty context se prompt fallback instruction relevant hai. Model exact phrase guarantee nahi.
+
+Q38. Scanned PDF?
+Answer: Text extraction blank/poor ho sakti hai. OCR implementation N/A.
+
+Q39. Password-protected PDF?
+Answer: PDFBox extraction fail kar sakti hai; specialized user-facing mapping evidence N/A.
+
+Q40. Multiple documents per chat?
+Answer: Payload singular documentId hai; multi-document retrieval N/A.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+======================
+Q41. MIME spoofed but .pdf?
+Answer: Current checks filename/MIME metadata hain; PDF magic/content/security scanning evidence nahi. Parser may fail later. Improvement magic bytes, safe parser limits, malware scan.
+
+Q42. Path traversal?
+Answer: Stored filename server-generated UUID hai, original filename path me use nahi hota; risk reduced.
+
+Q43. Huge extracted text?
+Answer: Input file bounded 25MB, extracted text/chunks still large ho sakte hain; sync latency/memory/Ollama calls grow. Job quotas needed.
+
+Q44. Duplicate semantic document different bytes?
+Answer: SHA-256 dedupe miss karega. Canonical text hash optional, but formatting differences/business ownership consider karni hogi.
+
+Q45. Ollama midway unavailable?
+Answer: Per-item embedding failures null ban sakte hain; widespread failure zero persisted chunks aur partial file/row risk.
+
+Q46. DB unavailable after file copy?
+Answer: File remains unless compensation implemented; current code cleanup evidence nahi.
+
+Q47. Context me prompt injection?
+Answer: Delimiters/system instruction risk reduce karte hain, eliminate nahi. Treat document as untrusted, tool access isolate, output policy/evals add.
+
+Q48. Another user's documentId?
+Answer: Main DOCUMENT chat controller ownership check reject karta hai. Diagnostic test-search endpoint ye check nahi karta.
+
+Q49. Stale documentId with NORMAL?
+Answer: Explicit mode contract me ignore hona chahiye. 75fed10 tests this; main me 920edf5 related fix but exact test absent.
+
+Q50. Missing chatMode but documentId present?
+Answer: NORMAL treat hona intended repaired contract hai; implicit RAG nahi.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+========================
+Q51. Validation error mapping?
+Answer: Service RuntimeException global 400 route le sakti hai; controller unauthenticated principal 401 return karta hai. Exact domain statuses coarse hain.
+
+Q52. IOException handling?
+Answer: Copy/save IOException “Failed to save uploaded file” RuntimeException me wrap hota hai.
+
+Q53. PDF parse exception?
+Answer: Extractor/service failure propagate; dedicated malformed/encrypted PDF error taxonomy evidence N/A.
+
+Q54. Stream retrieval error?
+Answer: Document retrieval, context building, aur prompt construction Flux subscription se pehle synchronous execute hote hain. Current handler in steps ko surrounding typed-error conversion me wrap nahi karta, isliye failure normal reactive `doOnError` ERROR/DONE event path tak guaranteed nahi pahunchti. Production improvement: pre-stream work ko explicit try/catch or reactive chain me wrap karke correlated ERROR/DONE terminal contract do.
+
+Q55. Retry strategy?
+Answer: Embedding per-item catch exists, bounded retry/circuit breaker evidence nahi. Blind whole-upload retry global hash/partial artifacts se conflict kar sakta hai.
+
+Q56. Better compensation?
+Answer: Upload job state PENDING/INDEXING/READY/FAILED, temp object, DB transaction for metadata/chunks, failure cleanup/outbox and resumable embedding.
+
+SECTION 8 — SECURITY QUESTIONS
+==================
+Q57. Upload authentication?
+Answer: DocumentController principal require karta hai; global security anyRequest authenticated bhi hai.
+
+Q58. Retrieval authorization?
+Answer: Chat controller document existence plus uploadedBy.username owner scope checks.
+
+Q59. SimilarityTestController gap?
+Answer: GET /api/v1/test-search documentId leta, hard-coded “What is Redis?” retrieve karta, ownership verify nahi karta. Authenticated IDOR-like diagnostic gap.
+
+Follow-up Q59.1. Fix?
+Answer: Endpoint remove/profile-gate ya owner/admin check; service integration test se smoke need replace.
+
+Q60. File security?
+Answer: UUID storage path traversal reduce karta hai; magic-byte validation, antivirus, PDF decompression/resource limits and object-store ACL evidence N/A.
+
+Q61. Logging privacy?
+Answer: File name, username, document ID, previews optionally log hote hain. Chunk/embedding preview sensitive document text leak kar sakta; production previews disable/redact.
+
+Q62. Global dedupe information leak?
+Answer: “Already uploaded” cross-user existence reveal kar sakta hai. Per-tenant hash uniqueness or generic response safer.
+
+SECTION 9 — DATABASE QUESTIONS
+==================
+Q63. V9 documents?
+Answer: Metadata, generated stored filename, MIME, size, uploader FK, timestamp, status. User FK cascade absent, deletion handling required.
+
+Q64. V10 chunks?
+Answer: document FK ON DELETE CASCADE, chunk_index, TEXT content, created timestamp. Unique(document_id,chunk_index) evidence absent.
+
+Q65. V11 embeddings?
+Answer: chunk_id UNIQUE and cascading FK, JSONB embedding, timestamp. One vector per chunk invariant.
+
+Q66. V12?
+Answer: 64-char globally unique non-null SHA-256 after legacy-null precondition.
+
+Q67. Why JSONB problematic?
+Answer: DB-native vector distance/index unavailable; serialization overhead and all candidates Java heap me.
+
+Q68. Referential delete?
+Answer: Document delete cascades chunks then embeddings. User delete may be blocked because V9 uploader FK no cascade.
+
+Q69. Chunk index uniqueness?
+Answer: Schema does not enforce per-document uniqueness; application assigns indices. Production invariant DB constraint se stronger hoga.
+
+Q70. Status semantics?
+Answer: Code builds document with “UPLOADED” before full chunk persistence. READY/FAILED lifecycle distinct nahi.
+
+SECTION 10 — API / REST QUESTIONS
+===================
+Q71. Upload contract?
+Answer: POST /api/v1/api/documents/upload, multipart/form-data, field file, success 201 DocumentUploadResponse.
+
+Q72. Document chat REST endpoint?
+Answer: N/A. Document selection chatMode/documentId STOMP payload me jati hai.
+
+Q73. List/delete documents API?
+Answer: Evidence in this branch docs/source inventory me N/A.
+
+Q74. Test-search API product search hai?
+Answer: Nahi; hard-coded query, fixed completion response aur no chunks. Diagnostic path hai.
+
+Q75. 25MB enforce kaha?
+Answer: Service constant; servlet/container multipart limit separately align hona chahiye, warna earlier rejection possible. Config exact deployment-dependent.
+
+Q76. API version path improvement?
+Answer: Controller path se duplicate /api remove, generated OpenAPI/contract tests se effective URL lock.
+
+SECTION 11 — FRONTEND QUESTIONS
+===================
+Q77. Upload UI kya state rakhti hai?
+Answer: Selected document/upload result aur chat mode. DOCUMENT without valid upload prevent hota hai.
+
+Q78. Upload automatically mode switch karta hai?
+Answer: Corrected design me nahi; user intent explicit toggle se.
+
+Q79. buildModePayloadFields?
+Answer: NORMAL explicit chatMode and no documentId; DOCUMENT explicit mode plus selected ID. Edit/recovery payloads me bhi same invariant.
+
+Q80. Upload progress?
+Answer: Synchronous request; granular extraction/embedding progress evidence N/A. Async job/SSE status improvement.
+
+Q81. Error UX?
+Answer: Upload/send failure UI path hai, but resumable/retry/partial-index explanation evidence N/A.
+
+Q82. Mode accessibility?
+Answer: Toggle keyboard/label/state announcements test hone chahiye; complete accessibility test evidence N/A.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+================================
+Q83. Upload concurrency risk?
+Answer: Hash precheck race plus non-atomic external/DB side effects.
+
+Q84. Retrieval during indexing?
+Answer: Sync upload response work complete hone ke baad aata, but partial failed document row possible. Status guard retrieval me explicit READY evidence nahi.
+
+Q85. Streaming cancellation RAG ko cancel karta hai?
+Answer: Retrieval/prompt build stream subscription se pehle synchronous work ho sakta hai; STOP primarily active Ollama stream dispose karta hai. Full cancellation propagation evidence N/A.
+
+Q86. Multi-instance?
+Answer: Uploaded filesystem local ho sakta hai; DB metadata shared hone par other node file lifecycle mismatch. Retrieval persisted chunks/vectors use karta, but upload/object durability still concern.
+
+Q87. Thread safety?
+Answer: Chunk/BM25 ranking local collections use karte hain; singleton mutable config reads hain. Main race resources/side effects me hai, algorithm local state me nahi.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+======================
+Q88. Biggest query bottleneck?
+Answer: Document ke all vectors/chunks load, JSONB deserialize aur Java cosine/BM25 score. Complexity roughly O(N*d + lexical corpus work).
+
+Q89. Upload bottleneck?
+Answer: PDF extraction + sequential Ollama embedding calls + row-by-row saves; synchronous request duration.
+
+Q90. True batching improvement?
+Answer: Embedding API batch support, parallelism with bounded concurrency, bulk DB inserts; ordering/failure mapping preserve karni hogi.
+
+Q91. Vector DB improvement?
+Answer: pgvector with HNSW/IVFFlat top-N dense candidates, then BM25/reranker. Tenant/document filter mandatory.
+
+Q92. Context budget benefit?
+Answer: Raw selected chunk content cap retrieval context growth reduce karta hai, lekin total prompt strictly bound nahi karta because labels, question, history, aur system prompt cap ke outside hain. Character count exact tokenizer budget bhi nahi hai; full prompt ke liye token-aware budget stronger approach hai.
+
+Q93. Caching?
+Answer: Query embedding/retrieval cache possible, but document/version/user keying and privacy invalidation required. Current cache N/A.
+
+SECTION 14 — TESTING QUESTIONS
+==================
+Q94. Tip tests kya protect karte hain?
+Answer: ChatStompPayloadChatModeTest missing mode NORMAL, explicit DOCUMENT, stale ID NORMAL contract; PromptBuilderServiceImplTest exact structure/fallback phrase.
+
+Q95. Kya tests main me hain?
+Answer: Nahi. 75fed10 unmerged tip hai; main 920edf5 related code patch rakhta hai without those tests.
+
+Q96. Upload tests?
+Answer: Empty/name/MIME/size, valid PDF, malformed/encrypted/scanned, hash duplicate/race, cleanup, partial embedding, DB failure.
+
+Q97. Retrieval tests?
+Answer: Known vectors cosine, dimension mismatch, zero vectors, BM25 exact term, all-zero fallback, weights, deterministic ties, topK bounds.
+
+Q98. Security tests?
+Answer: Cross-user DOCUMENT denied, test-search cross-user denied after fix, unauthenticated upload, filename/path abuse.
+
+Q99. RAG quality tests?
+Answer: Labeled question-document relevance set with recall@K/MRR, grounded-answer/fallback rate, prompt injection cases. Current evidence N/A.
+
+Q100. End-to-end?
+Answer: Test PDF upload→rows/vectors→DOCUMENT STOMP chunks/done; NORMAL stale ID proves no retrieval.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+===================================
+Q101. Production ingestion architecture?
+Answer: Upload object storage → metadata/job row → queue worker → sandboxed extraction → chunk/embed bulk write → READY status → retry/dead-letter/cleanup.
+
+Q102. Retrieval architecture?
+Answer: Owner-scoped filter → query embedding → vector top-N + lexical candidates → fusion/rerank → token-aware context → citations → generation.
+
+Q103. Consistency model?
+Answer: Status state machine and idempotent job keyed by content hash/tenant. File and DB coordination via outbox/saga, not distributed transaction.
+
+Q104. Observability?
+Answer: Extraction/chunk/embed/retrieval latency, chunk counts, null embeddings, candidate/top scores, failures and job age; sensitive previews off.
+
+Q105. Capacity controls?
+Answer: File/page/text/chunk limits, per-user quotas, queue backpressure, Ollama concurrency timeout, vector storage budgets.
+
+Q106. Citation support?
+Answer: Current chunks persist content/index only; heading/page metadata not fully persisted. Add source offsets/page/section and response citations.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+======================
+Q107. “Hybrid search DB me hota hai”?
+Answer: False. All document vectors load hote hain; cosine/BM25 Java me.
+
+Q108. “generateDocumentEmbeddings batch API call hai”?
+Answer: False. Windows/sequential calls; output shape preserves null failures.
+
+Q109. “SHA-256 owner-scoped hai”?
+Answer: False. V12 uniqueness global.
+
+Q110. “Prompt hallucination prevent karta hai”?
+Answer: False. Instruction risk reduce karti, guarantee nahi.
+
+Q111. “75fed10 main me merged hai”?
+Answer: False. Main has related non-equivalent 920edf5.
+
+Q112. “/test-search secure because authenticated”?
+Answer: Incomplete. Authentication hai, document ownership authorization nahi.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+=======================
+Q113. 14b38eb ke baad regression kya tha?
+Answer: Merged path documentId ko mandatory/every chat RAG route kar raha tha, normal chat break hua.
+
+Q114. 75fed10 vs 920edf5?
+Answer: Same concern—explicit NORMAL/DOCUMENT separation—par patch/test contents equivalent prove nahi. Tip tests main me absent.
+
+Q115. Voice branch relation?
+Answer: 920edf5 voice lineage me mode repair, phir 5df9a34 browser voice input. Voice transcript existing mode payload/STOMP send use karta hai.
+
+Q116. Streaming/reconnect relation?
+Answer: RAG prompt existing stream lifecycle me enters; clientStreamId, partial persistence, STOP/reconnect semantics same downstream pipeline par.
+
+Q117. Feedback relation?
+Answer: Completed RAG assistant message generic feedback receive kar sakta; provenance-specific feedback fields absent.
+
+Q118. Auth relation?
+Answer: REST upload bearer auth, STOMP document chat authenticated principal, document ownership username boundary.
+
+SECTION 18 — RAPID REVISION
+=========================
+Q119. Upload endpoint?
+Answer: POST /api/v1/api/documents/upload.
+
+Q120. Max size?
+Answer: 25 MB.
+
+Q121. Parser?
+Answer: Apache PDFBox.
+
+Q122. Dedupe?
+Answer: Global raw-byte SHA-256, V12 unique non-null.
+
+Q123. Migrations?
+Answer: V9 documents, V10 chunks, V11 JSONB embeddings, V12 file hash.
+
+Q124. Retrieval?
+Answer: Query embedding + all document vectors + Java cosine + BM25 + weighted fusion.
+
+Q125. Biggest security gap?
+Answer: /api/v1/test-search lacks ownership check; document preview logging also sensitive.
+
+Q126. Biggest reliability gap?
+Answer: Sync non-transactional filesystem/Ollama/multi-save ingestion without compensation.
+
+Q127. Biggest scale gap?
+Answer: All vectors loaded/scored in Java; no vector index.
+
+Q128. Test state?
+Answer: No main RAG behavior tests; 75fed10 tip-only DTO/prompt tests.
+
+Q129. Mode invariant?
+Answer: Missing mode=NORMAL; stale ID does not activate RAG; DOCUMENT needs explicit mode and owned ID.
+
+Q130. Best improvements?
+Answer: Async ingestion, object storage, status state machine, pgvector, owner-safe diagnostics, eval suite, citations.
+
+FACTUAL UNCERTAINTY
+===================
+1. Main and 75fed10 functional intent related hai, exact patch equivalence claim nahi.
+2. OCR, antivirus, object storage, vector index, citations and quality benchmarks repository evidence me N/A.
+3. Deployment proxy/container multipart limits external effective behavior alter kar sakte hain.
+4. Exact production document volume, embedding model dimensions/SLA and retention policy unknown.

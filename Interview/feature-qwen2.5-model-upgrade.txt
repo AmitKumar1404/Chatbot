@@ -1,0 +1,220 @@
+INTERVIEW PREPARATION
+Branch: feature/qwen2.5-model-upgrade
+
+PROJECT CONTEXT
+Commit `dd49b14` ne default Ollama model `${OLLAMA_MODEL:qwen2.5:7b}` kiya, whitespace-only streamed fragments preserve kiye, aur assistant output ko ReactMarkdown `10.1.0` + remark-gfm `4.0.1` se render kiya. Endpoint aur database contract unchanged rahe.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. LLM streaming me token/chunk kya hota hai?
+
+Answer:
+Model response incremental fragments me aata hai; chunk lexical token ke equal hona zaroori nahi aur whitespace-only bhi ho sakta hai.
+
+Follow-up Q1.1: Chunk boundaries par Markdown parse karna safe hai?
+
+Answer:
+Individual chunk incomplete syntax ho sakta hai. Project accumulated message render karta hai; backend fragments ko order aur exact whitespace ke saath forward karta hai.
+
+Q2. NDJSON kya hai?
+
+Answer:
+Newline-delimited JSON: har line independent JSON object hoti hai, streaming parser line-by-line process kar sakta hai.
+
+Q3. Whitespace Markdown me semantic kyun hai?
+
+Answer:
+Newlines, indentation aur blank spacing lists, tables, paragraphs aur code fences ki structure carry karte hain.
+
+Q4. ReactMarkdown aur remark-gfm kya roles play karte hain?
+
+Answer:
+ReactMarkdown Markdown AST ko React elements me render karta hai; remark-gfm tables, task lists, strikethrough jaise GFM syntax add karta hai.
+
+Follow-up Q4.1: Search highlight Markdown path kyun bypass karta hai?
+
+Answer:
+Existing highlighted output React nodes with `<mark>` banata hai; commit active search target ke liye wahi plain-text path preserve karta hai.
+
+Q5. Backpressure/cancellation streaming me kyun matter karte hain?
+
+Answer:
+Slow/disconnected client ke baad unnecessary parsing/emission avoid karni hoti hai; ordered bounded processing resource waste reduce karta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q6. Backend parser me exact behavior change kya hua?
+
+Answer:
+Old `.filter(text -> !text.isBlank())` hata. Successfully parsed, non-null response strings me whitespace preserve hoti hai; `done=true` plus empty response emit nahi hota. Missing/null `response` no fragment deta hai, aur malformed JSON parse error path se bhi fragment emit nahi hota.
+
+Q7. Model configuration exact kya hai?
+
+Answer:
+Default `${OLLAMA_MODEL:qwen2.5:7b}` hai, so environment override possible hai.
+
+Q8. Search-highlight case Markdown se alag kyun hai?
+
+Answer:
+Active assistant search match existing plain-text `<mark>` rendering use karta hai; other assistant content ReactMarkdown/GFM se render hota hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q9. Har blank chunk drop karna kyun wrong tha?
+
+Answer:
+`isBlank()` spaces/newlines/tabs sab drop karta hai. Stream concatenate hone par Markdown structure collapse ho sakti hai.
+
+Q10. Raw HTML directly render kyun nahi kiya?
+
+Answer:
+ReactMarkdown structured renderer safer default boundary deta hai; arbitrary HTML enabling separate sanitization decision mangta hai.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q11. Ollama line se UI tak flow trace karo.
+
+Answer:
+WebClient NDJSON line deta hai → ObjectMapper `response`/`done` parse karta hai → ordered Flux text emit karta hai → frontend accumulated assistant content ReactMarkdown/GFM render karta hai.
+
+Q12. Terminal frame kaise identify hota hai?
+
+Answer:
+`done` boolean true aur response empty ho to parser `Flux.empty()` return karta hai; nonterminal whitespace retained hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q13. Copy button rendered HTML copy karta hai?
+
+Answer:
+Nahi. Branch comment/flow raw `msg.content` ko copy source rakhta hai; Markdown rendering presentation layer hai.
+
+Q14. `visualize()` helper kyun add hua?
+
+Answer:
+Debug logs me carriage return/newline/tab visible escape form me dikhane ke liye; it does not alter emitted content.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q15. Response field missing/null ho to?
+
+Answer:
+Parser text null set karke no fragment emit karta hai.
+
+Q16. Malformed NDJSON middle me aaye to?
+
+Answer:
+Catch block warning log karta hai aur that line `Flux.empty()` ban jati hai; stream ka visible answer fragment lose ho sakta hai.
+
+Q17. Whitespace flood ka risk kya hai?
+
+Answer:
+Semantics preserve karna necessary hai, but pathological whitespace extra network/render/log work kara sakti hai; bounded metrics and tests useful hain.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q18. Ollama unavailable ho to is commit ka fallback kya hai?
+
+Answer:
+Koi new fallback add nahi hua; existing upstream error path apply hota hai. Model upgrade ko resilience feature claim nahi karna chahiye.
+
+Q19. Per-chunk debug logging production me concern kyun hai?
+
+Answer:
+High volume, cost aur generated content exposure risk. Debug disabled by default/policy and sensitive text logging bounded honi chahiye.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q20. Markdown rendering ka security review kya cover karega?
+
+Answer:
+Links/images, allowed elements, raw HTML policy, external navigation aur generated content trust. Is commit ne auth/security config change nahi ki.
+
+SECTION 9 — DATABASE QUESTIONS
+
+N/A — `dd49b14` ne migration, entity, repository ya stored schema change nahi ki.
+
+SECTION 10 — API / REST QUESTIONS
+
+N/A — REST/STOMP endpoint paths aur payload contracts unchanged rahe; only stream fragment handling/rendering changed.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+Q21. Assistant aur user message rendering same hai?
+
+Answer:
+Project change assistant bubble ko Markdown path deta hai; user rendering existing path par rehti hai.
+
+Q22. Streaming ke dauran empty-looking content ka special case kya hai?
+
+Answer:
+Existing assistant bubble active stream me trim-empty content par loading behavior use karta hai; whitespace preservation backend format ke liye hai.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+Q23. `.flatMap(mapper, 1)` ka practical effect kya hai?
+
+Answer:
+At most one mapped line in flight, so parse/emission order stable aur cancellation ke baad extra in-flight work bounded rehta hai.
+
+Q24. Kya this branch distributed streaming state solve karti hai?
+
+Answer:
+Nahi. Parser-level ordering hai; reconnect, Redis ownership aur multi-instance stream recovery separate concerns hain.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q25. Likely performance hotspots kya hain?
+
+Answer:
+Per-line JSON parse/logging, frequent React rerenders as content grows, Markdown reparsing, aur model latency. Measure first-token latency and token/render rate.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q26. Parser test matrix kya honi chahiye?
+
+Answer:
+Normal text, spaces/newlines/tabs, done+empty, done+nonempty, missing/null response, malformed JSON, ordered chunks and cancellation.
+
+Q27. Frontend regression tests?
+
+Answer:
+GFM table/list/code, raw copy text, search-highlight plain fallback, streaming placeholder and long-content rendering.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q28. Model rollout safe kaise karoge?
+
+Answer:
+Qwen image/model pre-pull and health check, env override canary, latency/error/output comparison, then controlled default rollout; old model override rollback.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q29. “Whitespace-only means no data” statement kyun trick hai?
+
+Answer:
+Text protocols me blank ho sakta hai, but Markdown stream me whitespace structure data hai. Context determines whether filtering safe hai.
+
+Q30. ReactMarkdown use karne se XSS automatically impossible hai?
+
+Answer:
+Absolute claim nahi. Default raw HTML behavior safer ho sakta hai, but plugins, links/images and future options still security review demand karte hain.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q31. Later UI overflow fix se relation kya hai?
+
+Answer:
+Markdown can expose long tables/code, while `b51bfb6` later generic bubble wrapping improve karta hai. Ownership separate hai.
+
+Q32. Swagger branch is streaming behavior ko document karti hai?
+
+Answer:
+Nahi. Springdoc REST schema STOMP/NDJSON rendering lifecycle capture nahi karta.
+
+SECTION 18 — RAPID REVISION
+
+Q33. Rapid revision?
+
+Answer:
+Qwen 2.5:7b default; valid non-null response whitespace preserve; done+empty suppress; missing/null response and malformed JSON se no fragment; ReactMarkdown/GFM; search match plain; no endpoint/DB; no parser tests.

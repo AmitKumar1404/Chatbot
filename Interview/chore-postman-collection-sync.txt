@@ -1,0 +1,152 @@
+INTERVIEW PREPARATION
+Branch: chore/postman-collection-sync
+
+PROJECT CONTEXT
+Commit `a0d9769` ne `backend/Chatbot.postman_collection.json` ko then-current REST contracts ke saath sync kiya aur incidental `.DS_Store` metadata bhi modify ki. Functional change manual API tooling tak limited tha: koi runtime function, Newman automation, database migration ya STOMP contract add nahi hua.
+
+SECTION 1 — BASIC INTERVIEW QUESTIONS
+
+Q1. Postman collection kya hoti hai?
+
+Answer:
+Related HTTP requests, variables, headers aur example bodies ka shareable JSON bundle. Team same API flows manually run kar sakti hai.
+
+Q2. Postman environment aur collection variable me kya difference hai?
+
+Answer:
+Collection variable collection ke saath logical default rakhta hai; environment variable dev/test/prod jaise target ke hisaab se value switch karta hai. Secrets ke current values repository me save nahi karne chahiye.
+
+Q3. Bearer token request me kaise bheja jata hai?
+
+Answer:
+`Authorization: Bearer <token>` header se. Collection me token variable reference hona safer hai, literal production token nahi.
+
+Q4. Manual collection aur automated API test me kya farq hai?
+
+Answer:
+Collection exploratory/manual verification ke liye useful hai. Automated test assertions, repeatability aur CI failure signal deta hai; is branch me Newman nahi hai.
+
+Follow-up Q4.1: Newman kya hai?
+
+Answer:
+Postman collections ka CLI runner, jo CI me requests aur assertions execute kar sakta hai.
+
+SECTION 2 — PROJECT-SPECIFIC INTERVIEW QUESTIONS
+
+Q5. Is commit ne kaunse request groups sync kiye?
+
+Answer:
+Register, Login, Me, Chat, session list/create/messages/delete/title, active stream aur search—total 11 named REST requests snapshot me the.
+
+Q6. Kya is branch ne koi endpoint implement kiya?
+
+Answer:
+Nahi. Commit ne Postman collection definitions aur incidental `.DS_Store` file modify ki; server controllers, services, aur runtime API behavior unchanged rahe. Collection synchronization runtime backend functionality nahi hai.
+
+SECTION 3 — WHY / WHY NOT QUESTIONS
+
+Q7. Collection ko manually maintain karne ka benefit aur risk kya hai?
+
+Answer:
+Benefit: quick onboarding aur ad-hoc debugging. Risk: controller/DTO badalne par silent drift; generated contract ya CI check absent ho to examples stale ho jate hain.
+
+SECTION 4 — HOW DOES IT WORK?
+
+Q8. Typical authenticated Postman flow kaise chalega?
+
+Answer:
+Environment me `baseUrl` set karo, Login run karo, returned access token variable me rakho, phir protected request bearer header ke saath bhejo. Actual validation server karta hai.
+
+SECTION 5 — FOLLOW-UP QUESTIONS
+
+Q9. Collection ko source of truth kyun nahi kahoge?
+
+Answer:
+Runtime route mappings, DTO validation aur security config authoritative hain. Postman JSON unka manual consumer hai, executable server contract nahi.
+
+SECTION 6 — WHAT-IF / EDGE CASE QUESTIONS
+
+Q10. Agar `baseUrl` me `/api/v1` already ho aur request path me bhi prefix ho to?
+
+Answer:
+Double prefix banega aur request 404 de sakti hai. Base URL convention ek jagah define karke examples consistently compose karne chahiye.
+
+Q11. Later pin/feedback/document endpoints ka kya hoga?
+
+Answer:
+Is historical commit me nahi hain. Collection ko later API changes ke saath regenerate/update karna padega.
+
+SECTION 7 — ERROR HANDLING & FAILURE SCENARIOS
+
+Q12. Stale token ya malformed body par collection kya handle karti hai?
+
+Answer:
+Koi custom recovery add nahi hua. Postman server ka 401/4xx response dikhata hai; assertions absent hon to reviewer ko manually notice karna padta hai.
+
+SECTION 8 — SECURITY QUESTIONS
+
+Q13. Checked-in Postman collection me security rule kya hona chahiye?
+
+Answer:
+Real access/refresh tokens, passwords aur environment current values commit nahi hone chahiye. Placeholder variables use karo; leak ho to credential rotate karo.
+
+SECTION 9 — DATABASE QUESTIONS
+
+N/A — `a0d9769` tooling-only commit hai; schema, repository ya persistence behavior change nahi hua.
+
+SECTION 10 — API / REST QUESTIONS
+
+Q14. Collection ke paths ko context path ke saath kaise validate karoge?
+
+Answer:
+Controller mappings aur configured `/api/v1` context ko compare karke representative requests run karunga. Better option generated OpenAPI collection plus smoke assertions hai.
+
+SECTION 11 — FRONTEND QUESTIONS
+
+N/A — frontend source aur browser behavior is branch me untouched the.
+
+SECTION 12 — CONCURRENCY / REAL-TIME QUESTIONS
+
+N/A — manual REST definitions ne runtime concurrency, streaming order ya STOMP behavior change nahi kiya.
+
+SECTION 13 — PERFORMANCE QUESTIONS
+
+Q15. Kya Postman collection performance/load testing tool hai?
+
+Answer:
+Is branch ke use me nahi. Manual request timing diagnostic ho sakti hai, lekin throughput/concurrency benchmark ke liye dedicated load tool chahiye.
+
+SECTION 14 — TESTING QUESTIONS
+
+Q16. Is branch ko realistically kaise test karoge?
+
+Answer:
+Collection JSON parse/import, all variable references resolve, representative auth/chat/search requests expected status den, aur secrets absent hon. Current branch me automated Newman evidence nahi hai.
+
+SECTION 15 — PRODUCTION / SYSTEM DESIGN QUESTIONS
+
+Q17. Production-grade contract sync ka design kya hoga?
+
+Answer:
+OpenAPI se collection generate karo, environment-specific non-secret variables rakho, CI me Newman smoke run aur breaking-spec diff add karo. STOMP ko separate contract me document karo.
+
+SECTION 16 — TRICK / CROSS QUESTIONS
+
+Q18. “Postman branch ne APIs add ki” statement kyun galat hai?
+
+Answer:
+Diff me runtime controller/service change hi nahi. Collection me request hona endpoint implementation ka proof nahi.
+
+SECTION 17 — CROSS-BRANCH QUESTIONS
+
+Q19. Swagger branch se iska natural connection kya hai?
+
+Answer:
+Springdoc REST schema generation source ban sakta hai, jisse manual collection drift reduce ho. Lekin dono branches ne actual generation/Newman pipeline add nahi ki.
+
+SECTION 18 — RAPID REVISION
+
+Q20. Is branch ke four recall points kya hain?
+
+Answer:
+`a0d9769`; tooling only; 11 then-current REST requests; no runtime functions/Newman. Main risk: later contract drift.
