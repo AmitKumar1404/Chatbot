@@ -1305,3 +1305,37 @@ VITE_API_BASE_URL=http://localhost:9999/api/v1
 - Ensure `MAIL_USERNAME` and `MAIL_FROM` are valid.
 - Use a Gmail App Password (not the Gmail account password).
 - Confirm that the `mail` actuator health status is `UP`.
+
+## 📸 Screenshots
+
+### UI Screenshots
+
+#### Chat Interface
+
+![Chat Interface](screenshots/UI/chat-interface.png)
+
+#### Audio
+
+![Audio](screenshots/UI/Audio.png)
+
+#### Connected / Disconnected
+
+![Connected / Disconnected](screenshots/UI/Connected-Disconnected.png)
+
+#### Edit
+
+![Edit](screenshots/UI/Edit.png)
+
+#### Feedback & Copy
+
+![Feedback & Copy](screenshots/UI/Feedback%20%26%20Copy.png)
+
+#### Pin & PDF Upload
+
+![Pin & PDF Upload](screenshots/UI/Pin%20%26%20pdf%20upload.png)
+
+### Database
+
+![Database](screenshots/DB/DB.png)
+
+![Database Details](screenshots/DB/db%202.png)
